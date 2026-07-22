@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::market::BboTick;
 use crate::{NuuError, Result};
 
-use super::{admit_tick, validate_sequence};
+use super::admit_tick;
 
 pub(super) struct CsvTickReader {
     files: Vec<PathBuf>,
@@ -14,7 +14,7 @@ pub(super) struct CsvTickReader {
     rows: Option<csv::StringRecordsIntoIter<File>>,
     start_us: u64,
     end_us: u64,
-    last_us: Option<u64>,
+    last_ms: Option<u64>,
     failed: bool,
 }
 
@@ -26,7 +26,7 @@ impl CsvTickReader {
             rows: None,
             start_us,
             end_us,
-            last_us: None,
+            last_ms: None,
             failed: false,
         }
     }
@@ -59,8 +59,7 @@ impl CsvTickReader {
             if close_time_us < self.start_us || close_time_us >= self.end_us {
                 continue;
             }
-            validate_sequence(&mut self.last_us, close_time_us)?;
-            return Ok(Some(admit_tick(close_time_us, price)?));
+            return Ok(Some(admit_tick(&mut self.last_ms, close_time_us, price)?));
         }
     }
 

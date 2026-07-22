@@ -91,9 +91,9 @@ domain shutdown.
 
 The current code contains only the temporary control Runtime, MacrossSignaler,
 BalancedRisk, ControlBotCycle, and ObserverExecutor. No Account, Ledger, trading
-Executor, Venue, or persistence behavior is wired. It proves that a standalone
-Rust process can repeatedly consume the exact three-month dataset through both
-CSV and Parquet and produce the expected tick and timer counts on Windows.
+Executor, Venue, or persistence behavior is wired. The initial three-month gate
+proved both CSV and Parquet. The extended gate proves 30 months of Parquet in
+fresh standalone Windows processes.
 
 Acceptance:
 
@@ -102,12 +102,20 @@ ticks = 7,948,800
 timer callbacks = 794,880
 CSV 200/200 pass
 Parquet 200/200 pass
+
+30-month Parquet ticks = 78,883,200
+30-month timer callbacks = 7,888,320
+first UTC timestamp = 1701388801000
+last UTC timestamp = 1780272000000
+30-month Parquet = 200/200 pass
 one-second pause between fresh processes
 ```
 
 CSV and Arrow Parquet are external replay boundaries. Both validate strict
 shape, types, values, and one-second sequence once, then emit trusted
-`BboTick` values. Arrow types never enter Runtime or the trading domain.
+`BboTick` values. A raw one-second close must fall in the final 1,000
+microseconds before its next UTC second and is normalized to that boundary.
+Arrow types never enter Runtime or the trading domain.
 
 ## Later Parity
 

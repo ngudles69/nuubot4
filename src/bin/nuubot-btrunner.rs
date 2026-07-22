@@ -7,10 +7,13 @@ use nuubot4::{NuuError, Result};
 
 /// Run one identity-only BtRunner process.
 fn main() -> ExitCode {
+    // parse arguments
     let identity = match parse_identity() {
         Ok(identity) => identity,
         Err(error) => return fail(None, error),
     };
+
+    // run and log results
     let result = run(identity.0, identity.1);
     match result {
         Ok(summary) => {
@@ -23,9 +26,13 @@ fn main() -> ExitCode {
 
 /// Parse identity and preserve the first lifecycle failure.
 fn run(sweep_id: u64, bot_id: u64) -> Result<BtRunSummary> {
-    // Run program lifecycle.
+    // runner init
     let mut runner = BtRunner::init(sweep_id, bot_id)?;
+
+    // runner start and run
     let result = runner.start().and_then(|_| runner.run());
+
+    // stop; preserve first failure
     let stop_result = runner.stop();
     match result {
         Err(error) => Err(error),
@@ -38,6 +45,7 @@ fn run(sweep_id: u64, bot_id: u64) -> Result<BtRunSummary> {
 
 /// Preserve fatal evidence outside lifecycle ownership.
 fn fail(identity: Option<(u64, u64)>, error: NuuError) -> ExitCode {
+    // handle fail
     let identity = identity.map(|(sweep_id, bot_id)| BotIdentity { sweep_id, bot_id });
     let log = failure_logger(identity);
     if let Err(log_error) = log.and_then(|log| log.error("program", &error.to_string())) {
@@ -49,6 +57,7 @@ fn fail(identity: Option<(u64, u64)>, error: NuuError) -> ExitCode {
 
 /// Accept exactly one positive Sweep and Bot identity.
 fn parse_identity() -> Result<(u64, u64)> {
+    // validate sweep_id and bot_id
     let mut args = std::env::args().skip(1);
     let sweep_id = args
         .next()

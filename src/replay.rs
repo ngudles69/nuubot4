@@ -152,26 +152,42 @@ impl TickReader {
 }
 
 /// Convert one external row into trusted internal time.
-pub(super) fn admit_tick(close_time_us: u64, price: f64) -> Result<BboTick> {
-    let ts_ms = close_time_us
-        .checked_add(1)
-        .ok_or_else(|| NuuError::Replay("close_time_us overflow".into()))?
-        / 1000;
-    BboTick::admit(ts_ms, price)
-}
+pub(super) fn admit_tick(
+    last_ms: &mut Option<u64>,
+    close_time_us: u64,
+    price: f64,
+) -> Result<BboTick> {
+    // Validate close boundary.
+    let fraction_us = close_time_us % 1_000_000;
+    if !(999_000..=999_999).contains(&fraction_us) {
+        return Err(NuuError::Replay(format!(
+            "1s close_time_us must end in 999000..=999999, received {close_time_us}"
+        )));
+    }
 
-/// Validate one-second source ordering once.
-pub(super) fn validate_sequence(last_us: &mut Option<u64>, close_time_us: u64) -> Result<()> {
-    if let Some(last) = *last_us {
-        let expected = last + 1_000_000;
-        if close_time_us != expected {
+    // Normalize close time.
+    let ts_ms = close_time_us
+        .checked_div(1_000_000)
+        .and_then(|second| second.checked_add(1))
+        .and_then(|second| second.checked_mul(1000))
+        .ok_or_else(|| NuuError::Replay("close_time_us normalization overflow".into()))?;
+
+    // Enforce one-second order.
+    if let Some(last) = *last_ms {
+        let expected = last
+            .checked_add(1000)
+            .ok_or_else(|| NuuError::Replay("1s sequence overflow".into()))?;
+        if ts_ms != expected {
             return Err(NuuError::Replay(format!(
-                "1s sequence expected {expected}, received {close_time_us}"
+                "1s sequence expected {expected}, received {ts_ms}"
             )));
         }
     }
-    *last_us = Some(close_time_us);
-    Ok(())
+
+    // Admit trusted tick.
+    let tick = BboTick::admit(ts_ms, price)?;
+    *last_ms = Some(ts_ms);
+    Ok(tick)
 }
 
 /// Build one exact calendar-month file list.
@@ -213,4 +229,49 @@ fn date_us(date: NaiveDate) -> Result<u64> {
             .timestamp_micros(),
     )
     .map_err(|_| NuuError::Replay("date precedes Unix epoch".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admit_tick;
+
+    #[test]
+    fn admits_mixed_precision_across_year_boundary() {
+        let mut last_ms = None;
+
+        let old = admit_tick(&mut last_ms, 1_735_689_599_999_000, 1.0).unwrap();
+        let new = admit_tick(&mut last_ms, 1_735_689_600_999_999, 1.0).unwrap();
+
+        assert_eq!(old.ts_ms(), 1_735_689_600_000);
+        assert_eq!(new.ts_ms(), 1_735_689_601_000);
+    }
+
+    #[test]
+    fn admits_ordinary_consecutive_ticks() {
+        let mut last_ms = None;
+
+        admit_tick(&mut last_ms, 1_000_999_999, 1.0).unwrap();
+        let tick = admit_tick(&mut last_ms, 1_001_999_999, 1.0).unwrap();
+
+        assert_eq!(tick.ts_ms(), 1_002_000);
+    }
+
+    #[test]
+    fn rejects_duplicate_and_gap() {
+        let mut last_ms = None;
+
+        admit_tick(&mut last_ms, 1_000_999_999, 1.0).unwrap();
+        assert!(admit_tick(&mut last_ms, 1_000_999_000, 1.0).is_err());
+        assert!(admit_tick(&mut last_ms, 1_002_999_999, 1.0).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_fraction() {
+        assert!(admit_tick(&mut None, 1_000_998_999, 1.0).is_err());
+    }
+
+    #[test]
+    fn rejects_sequence_overflow() {
+        assert!(admit_tick(&mut Some(u64::MAX), 1_000_999_999, 1.0).is_err());
+    }
 }

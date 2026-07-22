@@ -4,69 +4,62 @@ Last updated: 2026-07-22
 
 ## Focus
 
-Review the readable Rust names and L1 flow before porting canonical trading
-behavior below the temporary control Runtime.
+The 30-month BtRunner stability extension is complete. Resume the readable L1
+review before porting canonical trading behavior below the temporary Runtime.
 
-## Current State
+## Current Status
 
-- One Cargo package with standalone binary `nuubot-btrunner <sweep_id> <bot_id>`.
-- Current identity proof: Sweep 6 Bot 9, 2026-03-01 through 2026-06-01.
-- `config.toml` is the non-secret authority; current loader is `parquet`.
-- Nuubot4 reads `workspace/datastore/nuubot4_sweeps.db` and shared read-only
-  market data under `D:\workspace\data`.
-- The synchronous path is `BtRunner -> Runtime -> BotCycle -> Executors`;
-  Runtime also owns Signaler and Risks.
-- No Account/Ledger/trading stack, Simulator, live Runner, async task, channel,
-  `Arc`, or `Mutex` is wired yet.
-- Each calendar week is one owned `Vec<BboTick>`; external rows are validated
-  once, then trusted. Failures preserve the first cause, unwind initialized
-  children, log fatal evidence, and exit nonzero.
-- `main` is published at `github.com/ngudles69/nuubot4`.
+- `nuubot-btrunner 8 12` replays Parquet from `2023-12-01` through
+  `2026-06-01` in one standalone process.
+- Sweep 8/Bot 12 and its 30-month range live only in the ignored Nuubot4 SQLite
+  workspace. Nuubot3 and shared market data were not changed.
+- Ignored local `config.toml` has `max_cycles=999999` and Observer
+  `max_ticks=100000000` so this gate stays inside one BotCycle.
+- Pre-2025 closes end in `999000us`; 2025 onward ends in `999999us`. Both are
+  admitted only in the final 1,000 microseconds and normalized to the next UTC
+  second at the shared CSV/Parquet boundary.
+- `rtest.sh` now requires exit zero and `stop_reason=replay_end` for every PASS.
+- No Nuubot process or delegated work remains. No blockers.
 
-## Ownership Decision
+## Decisions
 
-Every current mutable structure has one synchronous owner; none needs `Arc` or
-`Mutex`. A future WebSocket transport may own a synchronized event queue only
-at its external boundary and must not share mutable Bot state.
+- Keep one timestamp path: validate raw close boundary, normalize once, then
+  require admitted timestamps to advance exactly 1,000ms. No legacy fallback.
+- Observer `max_ticks` completes and replaces BotCycle; only a Runtime stop such
+  as `max_cycles` ends replay early.
+- Plan-audit v1's early-stop prediction and timestamps were wrong and are
+  explicitly superseded in [the active plan](plans/btrunner-runtime-stage.md).
 
-[Recon ownership](wiki/recon.md) is canonical:
+## Proof
 
-```text
-Runtime -> BotCycle -> Executors -> each Executor owns Vec<Account>
-                                  -> Venue
-                                  -> Ledger -> Trades -> Orders -> Fills
-```
+- `cargo fmt`, `cargo fmt --check`, five focused replay tests, `cargo check`,
+  release build, and `git diff --check`: passed.
+- Forced early stop: temporary `max_cycles=1` produced `stop_reason=max_cycles`;
+  `rtest.sh` rejected it. Log:
+  `workspace/logs/nuubot4-rtest-s8-b12-1-20260722T065518Z.log`.
+- Standalone and one-process gates passed with 78,883,200 ticks, 7,888,320
+  callbacks, timestamps `1701388801000..1780272000000`, zero completed cycles,
+  and `stop_reason=replay_end`.
+- Final gate: 200/200 fresh processes passed; average 5.085s, minimum 5.020s,
+  maximum 5.195s. Log:
+  `workspace/logs/nuubot4-rtest-s8-b12-200-20260722T065614Z.log`.
+- [Implementation audit v2](audits/btrunner-30m-implementation-audit-v2.md):
+  PASS after comment-only readability fixes.
+- Full `cargo test` was not run; repo rules require focused proof unless the
+  user approves the full suite.
 
-Runtime owns the recon/Risk/decision sequence but no Accounts. BotCycle asks
-each Executor to reconcile its owned Accounts and returns owned
-`AccountSnapshot` values to Runtime for Risk.
+## Files Changed
 
-## Authoritative Proof
-
-- `cargo fmt --check`, `cargo check`, `cargo build --release`: passed.
-- `cargo test`: 1 passed across 3 suites.
-- Independent plan and implementation/ownership audits: passed after fixes.
-- CSV gate: 200/200 clean processes; 7,948,800 ticks and 794,880 callbacks per
-  run; average 1.053 s; log
-  `workspace/logs/nuubot4-rtest-s6-b9-200-20260721T174439Z.log`.
-- Parquet gate: 200/200 clean processes; identical counts; average 0.558 s;
-  log `workspace/logs/nuubot4-rtest-s6-b9-200-20260721T175157Z.log`.
-- Each process was fresh with a one-second pause.
-
-## Collaboration Closeout
-
-- `AGENTS.md` now requires startup reads of this handoff, `wiki/user.md`, and
-  `wiki/soul.md`, and records the controller/delegation workflow.
-- `wiki/user.md` holds the user working profile; `wiki/soul.md` holds the
-  chief-of-staff contract; `wiki/index.md` links both.
-- No delegated work is pending. No blockers.
-- This docs batch was checked by content inspection and `git diff --check`.
-  Rust tests were not rerun because Rust code did not change.
-- User authorized committing all current changes and pushing this turn.
+- Replay admission: `src/replay.rs`, `src/replay/csv.rs`,
+  `src/replay/parquet.rs`.
+- Harness and comments: `rtest.sh`, `src/bin/nuubot-btrunner.rs`.
+- Durable evidence: `plans/btrunner-runtime-stage.md`, `wiki/rust-port.md`, and
+  `audits/btrunner-30m-*.md`.
+- Local ignored state: `config.toml`, Sweep 8/Bot 12 database rows, proof logs.
 
 ## Next Action
 
-Review filenames, public function names, and visible flow in
-`src/bin/nuubot-btrunner.rs`, `src/btrunner.rs`, and `src/runtime.rs`. Rename or
-simplify before porting canonical Signaler/Executor/Risk behavior. Do not wire
-Account/Venue/Ledger or live Runner yet.
+Continue the one-question-at-a-time review of `src/bin/nuubot-btrunner.rs`, then
+`src/btrunner.rs` and `src/runtime.rs`. The `and_then` question is resolved:
+`run()` executes only when `start()` succeeds, while `stop()` still runs and the
+first lifecycle failure is preserved.

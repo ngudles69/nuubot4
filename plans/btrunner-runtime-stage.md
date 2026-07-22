@@ -203,6 +203,60 @@ Completed evidence:
 - Every run: 7,948,800 ticks, 794,880 callbacks, exact timestamps.
 - Final implementation and ownership audit: PASS.
 
+## 30-Month Stability Extension (2026-07-22)
+
+- All 30 Parquet files and 78,883,200 rows are complete for the half-open range
+  `2023-12-01..2026-06-01`; their represented seconds are continuous.
+- Raw close timestamps use two valid precisions: `2023-12..2024-12` end in
+  `999000us`, while `2025-01..2026-05` end in `999999us`. This is not missing
+  data.
+- Fix the shared `src/replay.rs` admission/sequence boundary used by CSV and
+  Parquet. Keep raw range filtering unchanged.
+- Require every accepted one-second candle close to fall within the final
+  1,000 microseconds before its next whole-second boundary. Normalize it to
+  that boundary's `ts_ms`, then require admitted timestamps to advance by
+  exactly 1,000ms.
+- Regression proof covers both precisions, the precision transition,
+  consecutive timestamps, duplicates, gaps, invalid fractions, and overflow.
+- This corrects the latent pre-2025 Nuubot3 `(close + 1) // 1000` defect without
+  modifying Nuubot3 or the shared source data.
+- After focused proof, force a real early Runtime stop with `max_cycles=1` and
+  prove that `rtest.sh` rejects it. Restore `max_cycles`, raise Observer
+  `max_ticks`, prove one standalone process with exact counts and timestamps,
+  then run the 200-process stability gate.
+- Expect exactly 78,883,200 ticks, 7,888,320 callbacks, first UTC timestamp
+  `1701388801000`, and last UTC timestamp `1780272000000`.
+- Create an isolated Nuubot4 test Bot identity in the copied SQLite database;
+  do not modify Nuubot3 or shared data.
+- Retain `cargo fmt` and `cargo fmt --check`, build release, and prove one
+  standalone process.
+- Run exactly 200 fresh processes through `rtest.sh`, with a one-second pause,
+  120-second timeout, first-failure stop, and dated log preservation.
+- `rtest.sh` counts PASS only when the process exits zero and its summary
+  contains `stop_reason=replay_end`. BtRunner internally enforces the exact
+  tick count, callback count, first timestamp, and last timestamp for every
+  complete replay.
+- A premature Runtime stop is not a completed stability replay.
+- Observer `max_ticks` completes and replaces one BotCycle; it does not stop
+  Runtime. The initial 10,000,000 cap therefore produced seven completed cycles
+  and still reached replay end. Raising it to 100,000,000 keeps this stability
+  run inside one BotCycle.
+- Negative gate proof: temporary `max_cycles=1` stopped at 10,000,001 ticks
+  with `stop_reason=max_cycles`; `rtest.sh` rejected it. Log:
+  `workspace/logs/nuubot4-rtest-s8-b12-1-20260722T065518Z.log`.
+- Standalone and one-process positive proofs passed with the exact counts and
+  UTC timestamps above, zero completed cycles, and `stop_reason=replay_end`.
+  Harness log: `workspace/logs/nuubot4-rtest-s8-b12-1-20260722T065546Z.log`.
+- Plan-audit v1's early-stop prediction was rejected by runtime proof:
+  `max_ticks` rotates BotCycle rather than stopping Runtime. Its timestamp
+  values were also eight hours early; the UTC values above are the source-data
+  boundaries. The v2 requirement to reject any non-`replay_end` summary remains
+  accepted and is proven by the forced `max_cycles` stop.
+- Final 30-month Parquet gate: 200/200 fresh processes passed; every run emitted
+  the exact counts, UTC timestamps, zero completed cycles, and
+  `stop_reason=replay_end`. Average 5.085s, minimum 5.020s, maximum 5.195s.
+  Log: `workspace/logs/nuubot4-rtest-s8-b12-200-20260722T065614Z.log`.
+
 ## Deliberate Deferrals
 
 - No Account/Ledger/Simulator types or fake handles.
