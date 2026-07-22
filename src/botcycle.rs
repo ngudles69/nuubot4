@@ -13,6 +13,8 @@ pub struct ControlBotCycle {
 }
 
 impl ControlBotCycle {
+    // Program flow
+
     /// Create and initialize every configured Executor.
     pub fn init(log: Logger, configs: &[ExecutorConfig]) -> Result<Self> {
         log.info("botcycle", "init")?;
@@ -39,24 +41,6 @@ impl ControlBotCycle {
         self.log.info("botcycle", "start")?;
         self.running = true;
         Ok(())
-    }
-
-    /// Deliver one trusted BBO to active Executors.
-    pub fn on_bbo(&mut self, bbo: BboTick) {
-        for executor in &mut self.executors {
-            if !executor.terminal() {
-                executor.on_bbo(bbo);
-            }
-        }
-    }
-
-    /// Deliver one trusted Bar to active Executors.
-    pub fn on_bar(&mut self, bar: Bar) {
-        for executor in &mut self.executors {
-            if !executor.terminal() {
-                executor.on_bar(bar);
-            }
-        }
     }
 
     /// Advance every active Executor once.
@@ -88,5 +72,25 @@ impl ControlBotCycle {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    // Domain inputs
+
+    /// Deliver one trusted BBO to active Executors.
+    pub fn on_bbo(&mut self, bbo: BboTick) {
+        for executor in &mut self.executors {
+            if !executor.terminal() {
+                executor.on_bbo(bbo);
+            }
+        }
+    }
+
+    /// Deliver one trusted Bar to active Executors.
+    pub fn on_bar(&mut self, bar: Bar) {
+        for executor in &mut self.executors {
+            if !executor.terminal() {
+                executor.on_bar(bar);
+            }
+        }
     }
 }

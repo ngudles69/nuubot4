@@ -1,13 +1,8 @@
 # Rust Port Contract
 
-## Objective
-
-Port Nuubot3 into a fully Rust application with the same observable trading,
-accounting, Risk, persistence, recovery, replay, and shutdown behavior.
-
-The port may use different internal structures where Rust provides a clearer
-solution. Behavior and ownership are the parity boundary, not Python class or
-line layout.
+The [Project](project.md) owns purpose, language, workspace boundaries, port
+order, lifecycle, and parity requirements. This page owns the behavioral-source
+contract, port architecture, and durable stability evidence.
 
 ## Source Of Truth
 
@@ -20,27 +15,6 @@ When code and documentation disagree:
 2. identify which path is currently reachable and proven;
 3. ask the user which behavior Nuubot4 should own;
 4. document the decision before implementation.
-
-## Workspace Contract
-
-Nuubot4 stores all writable state inside
-`D:\rust\nuubot4\workspace`. This includes configuration, SQLite databases,
-logs, results, caches, and temporary files.
-
-The sole shared external dependency is read-only market data under
-`D:\workspace\data`. Read the same data as Nuubot3; never rewrite it merely to
-make the Rust port pass.
-
-Use `nuubot4` names for datastore and artifact identities that could otherwise
-be confused:
-
-```text
-workspace/datastore/nuubot4_sweeps.db
-workspace/datastore/nuubot4_bot_<sweep_id>_<bot_id>.db
-PostgreSQL schema nuubot4, when later required
-```
-
-Never open a Nuubot3 datastore for writes.
 
 ## Architecture
 
@@ -61,31 +35,6 @@ the coherent Account reconciliation barrier. Each Executor owns its own
 `Vec<Account>` and reconciles those Accounts through the shared Executor trait
 method. Runtime receives owned Account snapshots for Risk, then allows Executor
 decisions. See [Recon Ownership and Flow](recon.md).
-
-## Lifecycle
-
-```text
-init
-    create and initialize owned children
-    leave drivers stopped
-
-start
-    establish initial truth
-    perform real ready-to-running transitions
-    open admission last
-
-run or mainloop
-    drive one long-lived input loop or one bounded decision pass
-
-stop
-    close admission first
-    quiesce input
-    unwind children safely
-    publish terminal evidence once
-```
-
-Rust destructors are a safety net for resources, not a replacement for visible
-domain shutdown.
 
 ## Proven Stability Slice
 

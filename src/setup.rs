@@ -18,9 +18,16 @@ pub struct SetupContext {
 pub fn nuubot_setup(sweep_id: u64, bot_id: u64) -> Result<SetupContext> {
     // Load root config.
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let early_log = Logger::new(root.join("workspace/logs/nuubot4-setup.log"))?;
-    early_log.info("setup", "load_config")?;
     let config = load_config(&root.join("config.toml"))?;
+
+    // Create Bot logger.
+    let identity = BotIdentity { sweep_id, bot_id };
+    let log = Logger::for_bot(
+        &rooted(root, &config.paths.logs),
+        identity,
+        config.logging.console,
+    )?;
+    log.info("setup", "load_config")?;
 
     // Resolve owned paths.
     let database = rooted(root, &config.paths.sweep_database);
@@ -37,9 +44,6 @@ pub fn nuubot_setup(sweep_id: u64, bot_id: u64) -> Result<SetupContext> {
         )));
     }
 
-    // Create Bot logger.
-    let identity = BotIdentity { sweep_id, bot_id };
-    let log = Logger::for_bot(&rooted(root, &config.paths.logs), identity)?;
     log.info("setup", "ready")?;
 
     // Return ready context.
@@ -50,19 +54,23 @@ pub fn nuubot_setup(sweep_id: u64, bot_id: u64) -> Result<SetupContext> {
     })
 }
 
-/// Resolve the configured fatal logger or the pre-config bootstrap log.
-pub fn failure_logger(identity: Option<BotIdentity>) -> Result<Logger> {
+/// Resolve the active process logger or initialize its fallback.
+pub fn program_logger(identity: Option<BotIdentity>) -> Result<Logger> {
+    if let Some(log) = Logger::current() {
+        return Ok(log);
+    }
+
     // Resolve available config.
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let log_dir = match load_config(&root.join("config.toml")) {
-        Ok(config) => rooted(root, &config.paths.logs),
-        Err(_) => root.join("workspace/logs"),
+    let (log_dir, console) = match load_config(&root.join("config.toml")) {
+        Ok(config) => (rooted(root, &config.paths.logs), config.logging.console),
+        Err(_) => (root.join("workspace/logs"), true),
     };
 
     // Select identity log.
     match identity {
-        Some(identity) => Logger::for_bot(&log_dir, identity),
-        None => Logger::new(log_dir.join("nuubot4-failure.log")),
+        Some(identity) => Logger::for_bot(&log_dir, identity, console),
+        None => Logger::new(log_dir.join("nuubot4-failure.log"), console),
     }
 }
 

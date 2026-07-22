@@ -11,9 +11,17 @@ use crate::{NuuError, Result};
 pub struct AppConfig {
     pub environment: EnvironmentConfig,
     pub paths: PathsConfig,
+    pub logging: LoggingConfig,
     pub btrunner: BtRunnerConfig,
     pub runtime: RuntimeConfig,
     pub simulator: SimulatorConfig,
+}
+
+/// Configure process logging outputs.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoggingConfig {
+    pub console: bool,
 }
 
 /// Select one named operating environment.

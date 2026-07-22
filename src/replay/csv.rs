@@ -19,6 +19,8 @@ pub(super) struct CsvTickReader {
 }
 
 impl CsvTickReader {
+    // Program flow
+
     pub(super) fn new(files: Vec<PathBuf>, start_us: u64, end_us: u64) -> Self {
         Self {
             files,
@@ -30,6 +32,27 @@ impl CsvTickReader {
             failed: false,
         }
     }
+}
+
+impl Iterator for CsvTickReader {
+    type Item = Result<BboTick>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        match self.next_tick() {
+            Ok(tick) => tick.map(Ok),
+            Err(error) => {
+                self.failed = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+impl CsvTickReader {
+    // Domain decoding
 
     /// Decode the next admitted CSV row.
     fn next_tick(&mut self) -> Result<Option<BboTick>> {
@@ -78,22 +101,5 @@ impl CsvTickReader {
         }
         self.rows = Some(reader.into_records());
         Ok(true)
-    }
-}
-
-impl Iterator for CsvTickReader {
-    type Item = Result<BboTick>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.failed {
-            return None;
-        }
-        match self.next_tick() {
-            Ok(tick) => tick.map(Ok),
-            Err(error) => {
-                self.failed = true;
-                Some(Err(error))
-            }
-        }
     }
 }

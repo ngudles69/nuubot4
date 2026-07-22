@@ -15,6 +15,8 @@ pub struct ObserverExecutor {
 }
 
 impl ObserverExecutor {
+    // Program flow
+
     /// Initialize one Observer Executor.
     pub fn init(log: Logger, config: ExecutorConfig) -> Result<Self> {
         log.info("executor", "init")?;
@@ -25,20 +27,6 @@ impl ObserverExecutor {
             bar_count: 0,
             terminal: false,
         })
-    }
-
-    /// Count one trusted BBO.
-    pub fn on_bbo(&mut self, _bbo: BboTick) {
-        if !self.terminal {
-            self.tick_count += 1;
-        }
-    }
-
-    /// Count one trusted Bar.
-    pub fn on_bar(&mut self, _bar: Bar) {
-        if !self.terminal {
-            self.bar_count += 1;
-        }
     }
 
     /// Evaluate configured terminal limits.
@@ -63,6 +51,22 @@ impl ObserverExecutor {
             self.log.info("executor", "stop")?;
         }
         Ok(())
+    }
+
+    // Domain inputs and state
+
+    /// Count one trusted BBO.
+    pub fn on_bbo(&mut self, _bbo: BboTick) {
+        if !self.terminal {
+            self.tick_count += 1;
+        }
+    }
+
+    /// Count one trusted Bar.
+    pub fn on_bar(&mut self, _bar: Bar) {
+        if !self.terminal {
+            self.bar_count += 1;
+        }
     }
 
     /// Report whether this Executor ended.

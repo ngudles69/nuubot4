@@ -26,6 +26,8 @@ pub(super) struct ParquetTickReader {
 }
 
 impl ParquetTickReader {
+    // Program flow
+
     pub(super) fn new(files: Vec<PathBuf>, start_us: u64, end_us: u64, batch_size: usize) -> Self {
         Self {
             files,
@@ -40,6 +42,27 @@ impl ParquetTickReader {
             failed: false,
         }
     }
+}
+
+impl Iterator for ParquetTickReader {
+    type Item = Result<BboTick>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        match self.next_tick() {
+            Ok(tick) => tick.map(Ok),
+            Err(error) => {
+                self.failed = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+impl ParquetTickReader {
+    // Domain decoding
 
     /// Decode the next admitted Parquet row.
     fn next_tick(&mut self) -> Result<Option<BboTick>> {
@@ -111,22 +134,5 @@ impl ParquetTickReader {
                 .build()?,
         );
         Ok(true)
-    }
-}
-
-impl Iterator for ParquetTickReader {
-    type Item = Result<BboTick>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.failed {
-            return None;
-        }
-        match self.next_tick() {
-            Ok(tick) => tick.map(Ok),
-            Err(error) => {
-                self.failed = true;
-                Some(Err(error))
-            }
-        }
     }
 }

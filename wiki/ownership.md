@@ -55,11 +55,11 @@ then lets Executors decide. No parent reaches through a child.
 - Read-only calls use temporary `&self` borrows.
 - Cross-owner state travels as owned values or snapshots.
 - Feeds return owned `Bar` or `BboTick` values; they retain no Runtime reference.
-- Logger clones share identity and path, not mutable domain state.
+- Logger handles share one process logger, not mutable domain state.
 - A datastore handle belongs to its store object.
 - No global mutable state or long-lived child references.
 - No `Arc`, `Rc`, `Mutex`, `RwLock`, `RefCell`, or shared Account without the
-  approval required by `AGENTS.md`.
+  approval required by [Coding Rules](coding/rules.md).
 
 ## Independent Modules
 

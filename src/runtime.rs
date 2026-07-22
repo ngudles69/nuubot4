@@ -29,6 +29,8 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    // Program flow
+
     /// Create and initialize the Runtime-owned subtree.
     pub fn init(log: Logger, config: RuntimeConfig) -> Result<Self> {
         log.info("runtime", "init")?;
@@ -71,37 +73,6 @@ impl Runtime {
             .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
             .start()?;
         self.started = true;
-        Ok(())
-    }
-
-    /// Deliver one trusted BBO to the active cycle.
-    pub fn ingest_bbo(&mut self, bbo: BboTick) -> Result<()> {
-        if !self.started || self.stopped || self.stop_reason.is_some() {
-            return Err(NuuError::Lifecycle(
-                "Runtime cannot ingest BBO from current state".into(),
-            ));
-        }
-        self.botcycle
-            .as_mut()
-            .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
-            .on_bbo(bbo);
-        Ok(())
-    }
-
-    /// Deliver trusted Bars through Signaler then BotCycle.
-    pub fn ingest_bars(&mut self, bars: &[Bar]) -> Result<()> {
-        if !self.started || self.stopped || self.stop_reason.is_some() {
-            return Err(NuuError::Lifecycle(
-                "Runtime cannot ingest Bars from current state".into(),
-            ));
-        }
-        for bar in bars {
-            self.signaler.on_bar(*bar);
-            self.botcycle
-                .as_mut()
-                .expect("initialized BotCycle")
-                .on_bar(*bar);
-        }
         Ok(())
     }
 
@@ -159,6 +130,39 @@ impl Runtime {
             Some(error) => Err(error),
             None => child_result,
         }
+    }
+
+    // Domain inputs and state
+
+    /// Deliver one trusted BBO to the active cycle.
+    pub fn ingest_bbo(&mut self, bbo: BboTick) -> Result<()> {
+        if !self.started || self.stopped || self.stop_reason.is_some() {
+            return Err(NuuError::Lifecycle(
+                "Runtime cannot ingest BBO from current state".into(),
+            ));
+        }
+        self.botcycle
+            .as_mut()
+            .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
+            .on_bbo(bbo);
+        Ok(())
+    }
+
+    /// Deliver trusted Bars through Signaler then BotCycle.
+    pub fn ingest_bars(&mut self, bars: &[Bar]) -> Result<()> {
+        if !self.started || self.stopped || self.stop_reason.is_some() {
+            return Err(NuuError::Lifecycle(
+                "Runtime cannot ingest Bars from current state".into(),
+            ));
+        }
+        for bar in bars {
+            self.signaler.on_bar(*bar);
+            self.botcycle
+                .as_mut()
+                .expect("initialized BotCycle")
+                .on_bar(*bar);
+        }
+        Ok(())
     }
 
     /// Return current Runtime evidence.
