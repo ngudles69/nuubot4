@@ -36,7 +36,7 @@ impl Runtime {
 
     /// Create and initialize the Runtime-owned subtree.
     pub fn init(log: Logger, config: RuntimeConfig) -> Result<Self> {
-        log.info("runtime", "init");
+        log.info("runtime", "init()");
 
         // Initialize direct children.
         let signaler = MacrossSignaler::init(log.clone(), config.signaler.clone())?;
@@ -75,13 +75,20 @@ impl Runtime {
         if self.started || self.stopped {
             return Err("Runtime cannot start from current state".into());
         }
-        self.log.info("runtime", "start");
+        self.log.info("runtime", "start()");
 
         // Start active cycle.
-        self.botcycle
+        let start_result = self
+            .botcycle
             .as_mut()
             .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
-            .start()?;
+            .start();
+        if let Err(error) = start_result {
+            self.stats.failed = true;
+            self.request_stop("runtime_start_error");
+            let _ = self.stop();
+            return Err(error);
+        }
         self.stats.cycles_started = 1;
         self.started = true;
         Ok(())
@@ -111,7 +118,7 @@ impl Runtime {
 
     /// Run the owned work for one Runtime pass.
     fn run_pass(&mut self, now_ms: u64) -> Result<bool> {
-        // Resolve Risk first.
+        // Evaluate risk.
         if self.risks.iter_mut().any(BalancedRisk::assess) {
             self.request_stop("risk");
         }
@@ -120,7 +127,7 @@ impl Runtime {
             return Ok(true);
         }
 
-        // Advance active cycle.
+        // Run active cycle.
         let completed = self
             .botcycle
             .as_mut()
@@ -168,6 +175,10 @@ impl Runtime {
             first_error.get_or_insert(error);
         }
 
+        if first_error.is_some() {
+            self.stats.failed = true;
+        }
+
         // Log only Runtime-owned stats.
         let status = if first_error.is_none() && !self.stats.failed {
             "success"
@@ -177,7 +188,7 @@ impl Runtime {
         self.log.info(
             "runtime",
             format!(
-                "stop status={status} ticks_accepted={} bars_accepted={} passes={}/{} failed_passes={} cycles={}/{} stop_reason={}",
+                "stop() status={status} ticks_accepted={} bars_accepted={} passes={}/{} failed_passes={} cycles={}/{} stop_reason={}",
                 self.stats.ticks_accepted,
                 self.stats.bars_accepted,
                 self.stats.passes_completed,
@@ -212,7 +223,10 @@ impl Runtime {
             return Err("Runtime cannot ingest Bars from current state".into());
         }
         for bar in bars {
-            self.signaler.on_bar(*bar);
+            // Evaluate signaler.
+            let _ = self.signaler.on_bar(*bar);
+
+            // Deliver bar to active cycle.
             self.botcycle
                 .as_mut()
                 .expect("initialized BotCycle")

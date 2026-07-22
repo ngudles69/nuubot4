@@ -14,6 +14,9 @@
 Run one Sweep Bot. Serve replay ticks. Drive Runtime. Stop direct children.
 Each owner logs its own statistics.
 
+BtRunner owns replay orchestration only. It does not collect or print Runtime,
+BotCycle, Risk, Signaler, or Executor statistics.
+
 ## Ownership
 
 ```text
@@ -64,7 +67,8 @@ parse_id(value)
 
 ```text
 BtRunner::init(&log, identity)
-  ctx = load config and Bot
+  ctx = nuubot_setup(&log, identity)
+  log.info("btrunner", "init")
   clock = TickClock::init(log, interval)
   ticks = TickReader::init(log, Bot, BtRunner config)
   runtime = Runtime::init(log, runtime_config)
@@ -78,7 +82,11 @@ BtRunner::start(&mut self)
 
 BtRunner::run(&mut self)
   guard lifecycle
+  start timing
+  replay()
+  record elapsed time even when replay fails
 
+BtRunner::replay(&mut self)
   for window in LoadingWindows
     for tick in ticks.load(window)
       runtime.ingest_bbo(tick)
@@ -94,9 +102,17 @@ BtRunner::run(&mut self)
   verify replay
   return OK
 
+verify replay
+  served ticks == expected ticks
+  triggered passes == expected passes
+  first timestamp == expected first timestamp
+  last timestamp == expected last timestamp
+  mark replay_completed=true
+
 BtRunner::stop(&mut self)
   if already stopped => Ok
   if not started => error
+  mark stopped
   stop Runtime, TickReader, Clock in reverse init order
   each child logs its own statistics
   log BtRunner-owned statistics
@@ -118,7 +134,8 @@ TickClock::advance(&mut self, now)
 Runtime::init()
   create Signaler
   create Risks
-  create BotCycle and Executors
+  create current control BotCycle
+  BotCycle creates its Executors
 
 Runtime::mainloop(&mut self, now)
   assess Risk
@@ -129,7 +146,16 @@ Runtime::mainloop(&mut self, now)
 Runtime::stop(&mut self)
   latch stop
   stop active BotCycle
+  stop Risks
+  stop Signaler
+  log Runtime-owned statistics
 ```
+
+This is the current BBO/Observer scaffold. Bars are not supplied by the current
+BtRunner path, Runtime discards Signaler output, and BotCycle creation is not
+yet signal-driven. The intended trading path is Signaler and Risk initialization
+at Runtime creation, then BotCycle and Executors created only for an actionable
+Signal.
 
 See [Signaler](signaler.md), [Executor](executor.md), and [Risk](risk.md).
 
@@ -143,5 +169,9 @@ See [Signaler](signaler.md), [Executor](executor.md), and [Risk](risk.md).
 - Each component logs its own statistics during its own `stop()`.
 - BtRunner reports success only when replay verification and child teardown
   both succeed.
+- `run()` may fail, but the executable still attempts `stop()` after a
+  successful `start()` so terminal evidence is preserved.
+- `replay_completed=true` is the current terminal replay marker used by
+  `rtest.sh`; exit zero alone is not proof of a complete replay.
 - Every process eagerly creates exactly one logger.
 - BtRunner replay flow matches.

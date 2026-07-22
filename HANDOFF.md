@@ -32,6 +32,12 @@ logs its own statistics during stop.
 - No agents or delegated work.
 - No active Nuubot process.
 - No blocker.
+- `src/runtime.rs` now has explicit placeholders for the future signal-driven
+  BotCycle shape. Signal generation and deferred cycle creation remain pending
+  until the Signaler is implemented.
+- Runtime start failures now attempt child cleanup and preserve the original
+  error; child stop failures mark Runtime failed while all children are still
+  attempted.
 
 ## Files Changed
 
@@ -52,6 +58,13 @@ logs its own statistics during stop.
   `errors.log`.
 - Fresh-process proof: 2/2 passed, then 1/1 passed after the final failure-state
   adjustment.
+- Two additional fresh-process runs passed after the Runtime cleanup changes:
+  `workspace/logs/nuubot4-rtest-s6-b9-1-20260722T180416Z.log` and
+  `workspace/logs/nuubot4-rtest-s6-b9-1-20260722T180417Z.log`.
+- Release binary rebuilt after lifecycle logging changes; an additional run
+  passed with `runtime: init()`, `runtime: start()`, and `runtime: stop()` in
+  the generated log:
+  `workspace/logs/nuubot4-rtest-s6-b9-1-20260722T180636Z.log`.
 - Latest proof logs:
   `workspace/logs/nuubot4-rtest-s6-b9-2-20260722T172255Z.log` and
   `workspace/logs/nuubot4-rtest-s6-b9-1-20260722T172424Z.log`.
@@ -69,5 +82,5 @@ logs its own statistics during stop.
 
 ## Next Action
 
-Review `src/runtime.rs` against the updated lifecycle, ownership, and telemetry
-rules before the next implementation pass.
+Implement the Signaler contract, then add deferred BotCycle creation and test
+that a signal on bar N can only enter on a later tick/bar.
