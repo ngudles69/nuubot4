@@ -78,9 +78,14 @@ Use the [Project Parity Proof](../project.md#parity-proof) for parity work.
 - Keep lifecycle order visible: `init -> start -> run/mainloop -> stop`.
 - Put work in its real phase. Omit empty or fake lifecycle methods.
 - Stop admission first, then unwind direct children in safe reverse order.
-- Make `stop` idempotent when reached. An earlier lifecycle error propagates
-  directly to the executable `main`; do not add a second cleanup error path
-  unless that component has an explicit recovery contract.
+- Make `stop` idempotent when reached. After `start` succeeds, the caller still
+  attempts `stop` when `run` or `mainloop` fails. Preserve the primary error;
+  return a stop error only when the primary work succeeded.
+- Each component owns and logs its own terminal statistics during `stop`.
+  Parents receive only control decisions and errors. Do not add summary
+  getters, collectors, or child-stat transfers for shutdown logging.
+- Compare expected work with completed work. Keep stage counts separate so
+  differences show where work stopped or was not active.
 - Prefer direct structs and functions. Use enums for closed state and outcomes.
 - Add a trait only when two current implementations need the same boundary.
 - Make invalid state difficult to represent without hiding lifecycle order.
@@ -147,7 +152,13 @@ See [Ownership and Project Structure](../ownership.md) for the current map.
   Bot, Sweep, Runner, or other domain identity.
 - Do not scatter ad hoc output or create per-component Bot logs.
 - Always write logs to file. `logging.console` controls only the console mirror.
-- The stability harness may write one run-summary log plus failure diagnostics.
+- The stability harness may write one terminal telemetry log plus failure
+  diagnostics.
+- Terminal status means the component's own lifecycle completed; it does not
+  claim that the strategy, execution, risk, or financial result was good.
+- Record only statistics that prove correctness, locate failure, measure effort
+  or timing, or evaluate a real domain result. Do not add counters because they
+  are available.
 
 ## Authority
 

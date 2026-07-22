@@ -3,32 +3,104 @@ use std::time::Instant;
 use crate::Result;
 use crate::clock::TickClock;
 use crate::common::logging::Logger;
-use crate::replay::{ReplayExpectation, ReplayWindows, TickReader, load_ticks, replay_expectation};
+use crate::config::{BtRunnerConfig, LoaderKind};
+use crate::datastore::BotSpec;
+use crate::replay::{LoadingWindows, TickReader};
 use crate::runtime::Runtime;
 use crate::setup::{SetupContext, nuubot_setup};
 
-/// Report one completed standalone replay.
-#[derive(Clone, Debug)]
-struct BtRunSummary {
+/// Track work owned by one BtRunner.
+struct BtRunnerStats {
     loader: &'static str,
-    ticks: u64,
-    callbacks: u64,
-    first_ts_ms: u64,
-    last_ts_ms: u64,
-    completed_cycles: u64,
-    stop_reason: Option<&'static str>,
+    windows_started: u64,
+    windows_completed: u64,
+    ticks_expected: u64,
+    ticks_served: u64,
+    passes_expected: u64,
+    passes_triggered: u64,
+    first_ts_ms: Option<u64>,
+    last_ts_ms: Option<u64>,
+    expected_first_ts_ms: u64,
+    expected_last_ts_ms: u64,
+    replay_completed: bool,
     elapsed_seconds: f64,
+}
+
+impl BtRunnerStats {
+    /// Initialize the exact work assigned to one BtRunner.
+    fn init(bot: &BotSpec, config: &BtRunnerConfig) -> Result<Self> {
+        let start_ts_ms = u64::try_from(
+            bot.start
+                .and_hms_opt(0, 0, 0)
+                .expect("valid midnight")
+                .and_utc()
+                .timestamp_millis(),
+        )
+        .map_err(|_| "replay start precedes Unix epoch".to_owned())?;
+        let expected_last_ts_ms = u64::try_from(
+            bot.end
+                .and_hms_opt(0, 0, 0)
+                .expect("valid midnight")
+                .and_utc()
+                .timestamp_millis(),
+        )
+        .map_err(|_| "replay end precedes Unix epoch".to_owned())?;
+        let duration_ms = expected_last_ts_ms
+            .checked_sub(start_ts_ms)
+            .ok_or_else(|| "replay end must follow start".to_owned())?;
+
+        Ok(Self {
+            loader: match config.loader {
+                LoaderKind::Csv => "csv",
+                LoaderKind::Parquet => "parquet",
+            },
+            windows_started: 0,
+            windows_completed: 0,
+            ticks_expected: duration_ms / 1000,
+            ticks_served: 0,
+            passes_expected: duration_ms.div_ceil(config.timer_interval_ms),
+            passes_triggered: 0,
+            first_ts_ms: None,
+            last_ts_ms: None,
+            expected_first_ts_ms: start_ts_ms + 1000,
+            expected_last_ts_ms,
+            replay_completed: false,
+            elapsed_seconds: 0.0,
+        })
+    }
+
+    /// Verify that this BtRunner completed its assigned replay.
+    fn verify(&mut self) -> Result<()> {
+        if self.ticks_served != self.ticks_expected
+            || self.passes_triggered != self.passes_expected
+            || self.first_ts_ms != Some(self.expected_first_ts_ms)
+            || self.last_ts_ms != Some(self.expected_last_ts_ms)
+        {
+            return Err(format!(
+                "replay ticks={}/{} passes={}/{} range={:?}..{:?}/{}..{}",
+                self.ticks_served,
+                self.ticks_expected,
+                self.passes_triggered,
+                self.passes_expected,
+                self.first_ts_ms,
+                self.last_ts_ms,
+                self.expected_first_ts_ms,
+                self.expected_last_ts_ms
+            ));
+        }
+        self.replay_completed = true;
+        Ok(())
+    }
 }
 
 /// Own and supervise one complete backtest program lifecycle.
 pub struct BtRunner {
-    setup: SetupContext,
+    ctx: SetupContext,
+    log: Logger,
     clock: TickClock,
-    runtime: Runtime,
     ticks: TickReader,
-    windows: ReplayWindows,
-    expected: ReplayExpectation,
-    summary: Option<BtRunSummary>,
+    runtime: Runtime,
+    stats: BtRunnerStats,
     started: bool,
     stopped: bool,
 }
@@ -36,31 +108,35 @@ pub struct BtRunner {
 impl BtRunner {
     /// Set up infrastructure and initialize direct children.
     pub fn init(log: Logger, sweep_id: u64, bot_id: u64) -> Result<Self> {
-        // Build shared setup.
-        let setup = nuubot_setup(log, sweep_id, bot_id)?;
-        setup.log.info("btrunner", "init");
+        // Init context.
+        let ctx = nuubot_setup(&log, sweep_id, bot_id)?;
+        log.info("btrunner", "init");
 
-        // Create Tick Clock.
-        let clock = TickClock::new(setup.config.btrunner.timer_interval_ms);
+        // Init TickClock.
+        let clock = TickClock::init(log.clone(), ctx.config.btrunner.timer_interval_ms);
 
-        // Load replay ticks.
-        let ticks = load_ticks(&setup.bot, &setup.config.btrunner)?;
-        let windows = ReplayWindows::new(&setup.bot)?;
-        let expected = replay_expectation(&setup.bot, setup.config.btrunner.timer_interval_ms)?;
+        // Init TickReader.
+        let ticks = TickReader::init(log.clone(), &ctx.bot, &ctx.config.btrunner)?;
 
-        // Create Bot Runtime.
-        let runtime = Runtime::init(setup.log.clone(), setup.config.runtime.clone())?;
-        Ok(Self {
-            setup,
+        // Init Runtime.
+        let runtime = Runtime::init(log.clone(), ctx.config.runtime.clone())?;
+
+        // Init BtRunner stats.
+        let stats = BtRunnerStats::init(&ctx.bot, &ctx.config.btrunner)?;
+
+        // Create BtRunner.
+        let runner = Self {
+            ctx,
+            log,
             clock,
-            runtime,
             ticks,
-            windows,
-            expected,
-            summary: None,
+            runtime,
+            stats,
             started: false,
             stopped: false,
-        })
+        };
+
+        Ok(runner)
     }
 
     /// Start the initialized Bot Runtime.
@@ -68,7 +144,7 @@ impl BtRunner {
         if self.started || self.stopped {
             return Err("BtRunner cannot start from current state".into());
         }
-        self.setup.log.info("btrunner", "start");
+        self.log.info("btrunner", "start");
         self.runtime.start()?;
         self.started = true;
         Ok(())
@@ -76,118 +152,111 @@ impl BtRunner {
 
     /// Replay every admitted tick until end or Bot stop.
     pub fn run(&mut self) -> Result<()> {
-        // lifecycle guard.
         if !self.started || self.stopped {
             return Err("BtRunner is not running".into());
         }
 
         // Start replay.
-        self.setup.log.info("btrunner", "run");
+        self.log.info("btrunner", "run");
         let started_at = Instant::now();
-        let mut ticks = 0_u64;
-        let mut first_ts_ms = None;
-        let mut last_ts_ms = None;
-        let mut replay_ended = true;
+        let result = self.replay();
+        self.stats.elapsed_seconds = started_at.elapsed().as_secs_f64();
+        result
+    }
 
+    /// Serve admitted ticks and trigger due Runtime passes.
+    fn replay(&mut self) -> Result<()> {
         // Replay windows.
-        'windows: for window in &mut self.windows {
-            self.setup.log.info(
+        'windows: for window in LoadingWindows::new(&self.ctx.bot)? {
+            self.stats.windows_started += 1;
+            self.log.info(
                 "btrunner",
                 format!("replay_window={}..{}", window.start, window.end),
             );
 
             // Replay ticks.
-            for tick in self.ticks.load_window(window)? {
-                // Record replay evidence.
-                first_ts_ms.get_or_insert(tick.ts_ms());
-                last_ts_ms = Some(tick.ts_ms());
-                ticks += 1;
-
-                // Drive Runtime and Clock.
+            for tick in self.ticks.load(window)? {
+                // Serve one tick.
                 self.runtime.ingest_bbo(tick)?;
-                if self.clock.advance(tick.ts_ms()) {
-                    self.runtime.mainloop(tick.ts_ms())?;
-                }
+                self.stats.first_ts_ms.get_or_insert(tick.ts_ms());
+                self.stats.last_ts_ms = Some(tick.ts_ms());
+                self.stats.ticks_served += 1;
 
-                // Stop when Runtime requests it.
-                if self.runtime.outcome().stop_requested {
-                    replay_ended = false;
-                    break 'windows;
+                // Trigger one due Runtime pass.
+                if self.clock.advance(tick.ts_ms()) {
+                    self.stats.passes_triggered += 1;
+                    if self.runtime.mainloop(tick.ts_ms())? {
+                        break 'windows;
+                    }
                 }
             }
+            self.stats.windows_completed += 1;
 
             // Pause between windows.
-            if self.setup.config.btrunner.window_pause_ms > 0 {
+            if self.ctx.config.btrunner.window_pause_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(
-                    self.setup.config.btrunner.window_pause_ms,
+                    self.ctx.config.btrunner.window_pause_ms,
                 ));
             }
         }
 
-        // Verify replay evidence.
-        let first_ts_ms = first_ts_ms.ok_or_else(|| "empty replay".to_owned())?;
-        let last_ts_ms = last_ts_ms.expect("non-empty replay");
-        let callbacks = self.runtime.mainloop_count();
-        if replay_ended
-            && (ticks != self.expected.ticks
-                || callbacks != self.expected.callbacks
-                || first_ts_ms != self.expected.first_ts_ms
-                || last_ts_ms != self.expected.last_ts_ms)
-        {
-            return Err(format!(
-                "evidence ticks={ticks}/{} callbacks={callbacks}/{} range={first_ts_ms}..{last_ts_ms}/{}..{}",
-                self.expected.ticks,
-                self.expected.callbacks,
-                self.expected.first_ts_ms,
-                self.expected.last_ts_ms
-            ));
-        }
-
-        // Store replay summary.
-        let outcome = self.runtime.outcome();
-        self.summary = Some(BtRunSummary {
-            loader: match self.setup.config.btrunner.loader {
-                crate::config::LoaderKind::Csv => "csv",
-                crate::config::LoaderKind::Parquet => "parquet",
-            },
-            ticks,
-            callbacks,
-            first_ts_ms,
-            last_ts_ms,
-            completed_cycles: outcome.completed_cycles,
-            stop_reason: outcome.stop_reason,
-            elapsed_seconds: started_at.elapsed().as_secs_f64(),
-        });
-        Ok(())
+        // Verify replay.
+        self.stats.verify()
     }
 
-    /// Stop Runtime and close admission once.
+    /// Stop direct children and log BtRunner stats once.
     pub fn stop(&mut self) -> Result<()> {
         if self.stopped {
             return Ok(());
         }
-        self.setup.log.info("btrunner", "stop");
+        if !self.started {
+            return Err("BtRunner is not running".into());
+        }
         self.started = false;
         self.stopped = true;
-        self.runtime.stop()?;
-        if let Some(summary) = self.summary.take() {
-            self.setup.log.info("btrunner", format_summary(&summary));
+
+        // Stop direct children in reverse initialization order.
+        let mut first_error = None;
+        if let Err(error) = self.runtime.stop() {
+            first_error = Some(error);
+        }
+        if let Err(error) = self.ticks.stop() {
+            first_error.get_or_insert(error);
+        }
+        if let Err(error) = self.clock.stop() {
+            first_error.get_or_insert(error);
+        }
+
+        // Log only BtRunner-owned stats.
+        let status = if self.stats.replay_completed && first_error.is_none() {
+            "success"
+        } else {
+            "failed"
+        };
+        self.log.info(
+            "btrunner",
+            format!(
+                "stop status={status} loader={} windows={}/{} ticks={}/{} passes={}/{} first_ts_ms={:?} last_ts_ms={:?} replay_completed={} elapsed_seconds={:.3}",
+                self.stats.loader,
+                self.stats.windows_completed,
+                self.stats.windows_started,
+                self.stats.ticks_served,
+                self.stats.ticks_expected,
+                self.stats.passes_triggered,
+                self.stats.passes_expected,
+                self.stats.first_ts_ms,
+                self.stats.last_ts_ms,
+                self.stats.replay_completed,
+                self.stats.elapsed_seconds
+            ),
+        );
+
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        if !self.stats.replay_completed {
+            return Err("BtRunner replay did not complete".into());
         }
         Ok(())
     }
-}
-
-/// Format one successful replay result.
-fn format_summary(summary: &BtRunSummary) -> String {
-    format!(
-        "PASS loader={} ticks={} callbacks={} first_ts_ms={} last_ts_ms={} completed_cycles={} stop_reason={} elapsed_seconds={:.3}",
-        summary.loader,
-        summary.ticks,
-        summary.callbacks,
-        summary.first_ts_ms,
-        summary.last_ts_ms,
-        summary.completed_cycles,
-        summary.stop_reason.unwrap_or("replay_end"),
-        summary.elapsed_seconds
-    )
 }

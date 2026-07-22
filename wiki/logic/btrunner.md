@@ -11,7 +11,8 @@
 
 ## Intent
 
-Run one Sweep Bot. Replay ticks. Drive Runtime. Stop once. Log one result.
+Run one Sweep Bot. Serve replay ticks. Drive Runtime. Stop direct children.
+Each owner logs its own statistics.
 
 ## Ownership
 
@@ -19,7 +20,7 @@ Run one Sweep Bot. Replay ticks. Drive Runtime. Stop once. Log one result.
 main
 `-- mut BtRunner
     |-- TickClock
-    |-- ReplayInput
+    |-- TickReader
     `-- Runtime
         |-- Signaler
         |-- Vec<Risk>
@@ -50,9 +51,9 @@ run(identity)
   log = logger(bot log filename)?
   mut runner = BtRunner::init(log, identity)?
   runner.start()?
-  runner.run()?
-  runner.stop()?
-  return OK
+  run_result = runner.run()
+  stop_result = runner.stop()
+  return run_result.and(stop_result)
 
 parse_id(value)
   reject non-numeric or zero value
@@ -63,10 +64,11 @@ parse_id(value)
 
 ```text
 BtRunner::init(&log, identity)
-  setup = load config and Bot
-  clock = TickClock::new(interval)
-  replay = load ticks, windows, expected evidence
+  ctx = load config and Bot
+  clock = TickClock::init(log, interval)
+  ticks = TickReader::init(log, Bot, BtRunner config)
   runtime = Runtime::init(log, runtime_config)
+  stats = BtRunnerStats::init(Bot, BtRunner config)
   return stopped BtRunner
 
 BtRunner::start(&mut self)
@@ -77,29 +79,28 @@ BtRunner::start(&mut self)
 BtRunner::run(&mut self)
   guard lifecycle
 
-  for window in replay_windows
-    for tick in window
-      record evidence
+  for window in LoadingWindows
+    for tick in ticks.load(window)
       runtime.ingest_bbo(tick)
+      record served tick
 
       if clock.advance(tick.time) is due
-        runtime.mainloop(tick.time)
-
-      if runtime requested stop
-        break replay
+        passes_triggered += 1
+        if runtime.mainloop(tick.time)
+          break replay
 
     pause between windows when configured
 
-  verify replay evidence
-  store summary
+  verify replay
   return OK
 
 BtRunner::stop(&mut self)
   if already stopped => Ok
-  mark stopped
-  runtime.stop()?
-  log successful summary when present
-  return OK
+  if not started => error
+  stop Runtime, TickReader, Clock in reverse init order
+  each child logs its own statistics
+  log BtRunner-owned statistics
+  return first stop error, if any
 ```
 
 ## clock.rs
@@ -139,6 +140,8 @@ See [Signaler](signaler.md), [Executor](executor.md), and [Risk](risk.md).
 - Parsed identity creates one named Bot logger before database validation.
 - Bot errors go to the Bot log and `errors.log` through that installed logger.
 - Lower functions only propagate errors through `Result` and `?`.
-- `BtRunner::stop()` logs the successful summary once.
+- Each component logs its own statistics during its own `stop()`.
+- BtRunner reports success only when replay verification and child teardown
+  both succeed.
 - Every process eagerly creates exactly one logger.
 - BtRunner replay flow matches.

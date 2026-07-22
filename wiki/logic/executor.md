@@ -59,5 +59,7 @@ Runtime -> BotCycle reconcile -> Risk -> BotCycle decisions -> Executor -> Accou
 ## Code Alignment
 
 - ObserverExecutor only counts events and becomes terminal.
+- ObserverExecutor logs its own event, pass, and terminal-reason statistics
+  during stop.
 - Executor trait, Accounts, reconciliation, and trading actions are not ported.
 - Current Runtime calls Risk before Executor because Account truth is absent.

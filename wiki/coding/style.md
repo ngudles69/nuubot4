@@ -44,6 +44,8 @@ obvious.
   `init -> start -> run/mainloop -> stop`.
 - Omit lifecycle phases that have no real work. Never add placeholder methods
   merely to fill the sequence.
+- After `start()` succeeds, attempt `stop()` even when `run()` or `mainloop()`
+  returns an error. Preserve the primary error; cleanup must not hide it.
 - Define private domain calculations and mechanical helpers after the public
   flow even when lifecycle methods call them. A reader must not hunt through
   the file for `start`, `run`, `mainloop`, or `stop`.
@@ -51,6 +53,8 @@ obvious.
   expression.
 - Hide mechanics behind the boundary that owns them. Application code says
   `log`; the logging library owns file and console output.
+- Preserve stage statistics separately. Do not merge counts from different
+  owners; their differences locate failures and inactive stages.
 - Put policy in configuration. Do not scatter policy checks through application
   code.
 
@@ -102,6 +106,10 @@ intent.
 - There is no one-word or two-word rule. Use the shortest unmistakable name.
 - Keep outcome logging visible as `log.info(...)` or `log.error(...)`. Do not
   hide one-use outcome branches behind logging wrappers.
+- Each component logs its own terminal statistics during `stop()`. Parents pass
+  control and errors, not child summaries.
+- Log expected work beside completed work. A count without its expected value
+  or invariant is not evidence of success.
 - Treat a program's argument parser as program flow. Parsing primitives used by
   multiple owners are mechanical helpers.
 - Add a named type only when the current values become unclear. For example,
@@ -115,3 +123,10 @@ owner, ordered flow, available lifecycle phases, paired outcomes, and side
 effects must still be clear. A missing lifecycle phase must be obvious from the
 canonical order. If understanding requires hunting through the file or opening
 every helper, improve the structure or names.
+
+Terminal review must also answer:
+
+- What work was expected?
+- What work completed?
+- What proves success or failure?
+- Which owner logs that evidence?

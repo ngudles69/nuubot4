@@ -46,3 +46,4 @@ Signaler output -> BotCycle / Executor flow
 - Macross calculation is ported.
 - Runtime currently discards the returned Signal.
 - Signal-driven BotCycle creation is not ported.
+- MacrossSignaler logs its own evaluation and signal statistics during stop.

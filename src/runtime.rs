@@ -6,12 +6,16 @@ use crate::market::{Bar, BboTick};
 use crate::risk::BalancedRisk;
 use crate::signaler::MacrossSignaler;
 
-/// Expose one bounded Runtime result to BtRunner.
-#[derive(Clone, Copy, Debug)]
-pub struct RuntimeOutcome {
-    pub stop_requested: bool,
-    pub stop_reason: Option<&'static str>,
-    pub completed_cycles: u64,
+/// Track work owned by one Runtime.
+struct RuntimeStats {
+    ticks_accepted: u64,
+    bars_accepted: u64,
+    passes_started: u64,
+    passes_completed: u64,
+    passes_failed: u64,
+    cycles_started: u64,
+    completed_cycles: u64,
+    failed: bool,
 }
 
 /// Own and sequence one Bot's control components.
@@ -21,8 +25,7 @@ pub struct Runtime {
     signaler: MacrossSignaler,
     risks: Vec<BalancedRisk>,
     botcycle: Option<ControlBotCycle>,
-    mainloop_count: u64,
-    completed_cycles: u64,
+    stats: RuntimeStats,
     stop_reason: Option<&'static str>,
     started: bool,
     stopped: bool,
@@ -41,17 +44,26 @@ impl Runtime {
             .risks
             .iter()
             .cloned()
-            .map(|config| BalancedRisk::init(log.clone(), config))
+            .enumerate()
+            .map(|(index, config)| BalancedRisk::init(log.clone(), index + 1, config))
             .collect::<Result<Vec<_>>>()?;
-        let botcycle = ControlBotCycle::init(log.clone(), &config.executors)?;
+        let botcycle = ControlBotCycle::init(log.clone(), 1, &config.executors)?;
         Ok(Self {
             log,
             config,
             signaler,
             risks,
             botcycle: Some(botcycle),
-            mainloop_count: 0,
-            completed_cycles: 0,
+            stats: RuntimeStats {
+                ticks_accepted: 0,
+                bars_accepted: 0,
+                passes_started: 0,
+                passes_completed: 0,
+                passes_failed: 0,
+                cycles_started: 0,
+                completed_cycles: 0,
+                failed: false,
+            },
             stop_reason: None,
             started: false,
             stopped: false,
@@ -70,24 +82,42 @@ impl Runtime {
             .as_mut()
             .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .start()?;
+        self.stats.cycles_started = 1;
         self.started = true;
         Ok(())
     }
 
-    /// Perform one bounded Bot decision pass.
-    pub fn mainloop(&mut self, now_ms: u64) -> Result<RuntimeOutcome> {
+    /// Perform one bounded Bot pass and report whether Runtime requested stop.
+    pub fn mainloop(&mut self, now_ms: u64) -> Result<bool> {
         if !self.started || self.stopped {
             return Err("Runtime is not running".into());
         }
-        self.mainloop_count += 1;
+        self.stats.passes_started += 1;
 
+        let result = self.run_pass(now_ms);
+        match result {
+            Ok(stop_requested) => {
+                self.stats.passes_completed += 1;
+                Ok(stop_requested)
+            }
+            Err(error) => {
+                self.stats.passes_failed += 1;
+                self.stats.failed = true;
+                self.request_stop("runtime_error");
+                Err(error)
+            }
+        }
+    }
+
+    /// Run the owned work for one Runtime pass.
+    fn run_pass(&mut self, now_ms: u64) -> Result<bool> {
         // Resolve Risk first.
-        if self.risks.iter().any(BalancedRisk::assess) {
+        if self.risks.iter_mut().any(BalancedRisk::assess) {
             self.request_stop("risk");
         }
         if self.stop_reason.is_some() {
             self.close_cycle()?;
-            return Ok(self.outcome());
+            return Ok(true);
         }
 
         // Advance active cycle.
@@ -97,33 +127,68 @@ impl Runtime {
             .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .mainloop(now_ms)?;
         if !completed {
-            return Ok(self.outcome());
+            return Ok(false);
         }
 
         // Replace completed cycle.
         self.close_cycle()?;
-        self.completed_cycles += 1;
-        if self.completed_cycles >= self.config.max_cycles {
+        self.stats.completed_cycles += 1;
+        if self.stats.completed_cycles >= self.config.max_cycles {
             self.request_stop("max_cycles");
-            return Ok(self.outcome());
+            return Ok(true);
         }
-        let mut next = ControlBotCycle::init(self.log.clone(), &self.config.executors)?;
+        let cycle_no = self.stats.cycles_started + 1;
+        let mut next = ControlBotCycle::init(self.log.clone(), cycle_no, &self.config.executors)?;
         next.start()?;
         self.botcycle = Some(next);
-        Ok(self.outcome())
+        self.stats.cycles_started += 1;
+        Ok(false)
     }
 
-    /// Stop admission and unwind direct children once.
+    /// Stop direct children and log Runtime stats once.
     pub fn stop(&mut self) -> Result<()> {
         if self.stopped {
             return Ok(());
         }
-        // Close child ownership.
-        self.log.info("runtime", "stop");
         self.request_stop("parent_stop");
         self.started = false;
         self.stopped = true;
-        self.close_cycle()
+
+        // Stop direct children in reverse initialization order.
+        let mut first_error = None;
+        if let Err(error) = self.close_cycle() {
+            first_error = Some(error);
+        }
+        for risk in self.risks.iter_mut().rev() {
+            if let Err(error) = risk.stop() {
+                first_error.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.signaler.stop() {
+            first_error.get_or_insert(error);
+        }
+
+        // Log only Runtime-owned stats.
+        let status = if first_error.is_none() && !self.stats.failed {
+            "success"
+        } else {
+            "failed"
+        };
+        self.log.info(
+            "runtime",
+            format!(
+                "stop status={status} ticks_accepted={} bars_accepted={} passes={}/{} failed_passes={} cycles={}/{} stop_reason={}",
+                self.stats.ticks_accepted,
+                self.stats.bars_accepted,
+                self.stats.passes_completed,
+                self.stats.passes_started,
+                self.stats.passes_failed,
+                self.stats.completed_cycles,
+                self.stats.cycles_started,
+                self.stop_reason.unwrap_or("unknown")
+            ),
+        );
+        first_error.map_or(Ok(()), Err)
     }
 
     // Domain inputs and state
@@ -137,6 +202,7 @@ impl Runtime {
             .as_mut()
             .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .on_bbo(bbo);
+        self.stats.ticks_accepted += 1;
         Ok(())
     }
 
@@ -151,22 +217,9 @@ impl Runtime {
                 .as_mut()
                 .expect("initialized BotCycle")
                 .on_bar(*bar);
+            self.stats.bars_accepted += 1;
         }
         Ok(())
-    }
-
-    /// Return current Runtime evidence.
-    pub fn outcome(&self) -> RuntimeOutcome {
-        RuntimeOutcome {
-            stop_requested: self.stop_reason.is_some(),
-            stop_reason: self.stop_reason,
-            completed_cycles: self.completed_cycles,
-        }
-    }
-
-    /// Return the completed callback count.
-    pub fn mainloop_count(&self) -> u64 {
-        self.mainloop_count
     }
 
     /// Latch the first stop reason.

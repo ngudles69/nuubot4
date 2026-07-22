@@ -43,10 +43,10 @@ for ((run = 1; run <= runs; run++)); do
     if [[ $elapsed_ms -gt $maximum_ms ]]; then
         maximum_ms=$elapsed_ms
     fi
-    if [[ $status -ne 0 || "$output" != *" stop_reason=replay_end "* ]]; then
+    if [[ $status -ne 0 || "$output" != *" replay_completed=true "* ]]; then
         if [[ $status -eq 0 ]]; then
             status=1
-            printf 'run=%d incomplete_replay=missing_stop_reason_replay_end\n' "$run"
+            printf 'run=%d incomplete_replay=missing_replay_completed_true\n' "$run"
         fi
         printf 'run=%d result=FAIL exit=%d elapsed_ms=%d\n' "$run" "$status" "$elapsed_ms"
         printf 'requested=%d attempted=%d passed=%d failed=1 total_ms=%d min_ms=%d max_ms=%d log=%s\n' \

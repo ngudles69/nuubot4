@@ -231,10 +231,9 @@ Completed evidence:
   standalone process.
 - Run exactly 200 fresh processes through `rtest.sh`, with a one-second pause,
   120-second timeout, first-failure stop, and dated log preservation.
-- `rtest.sh` counts PASS only when the process exits zero and its summary
-  contains `stop_reason=replay_end`. BtRunner internally enforces the exact
-  tick count, callback count, first timestamp, and last timestamp for every
-  complete replay.
+- `rtest.sh` counts PASS only when the process exits zero and BtRunner logs
+  `replay_completed=true`. BtRunner internally enforces the exact tick count,
+  pass count, first timestamp, and last timestamp for every complete replay.
 - A premature Runtime stop is not a completed stability replay.
 - Observer `max_ticks` completes and replaces one BotCycle; it does not stop
   Runtime. The initial 10,000,000 cap therefore produced seven completed cycles

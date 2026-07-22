@@ -44,12 +44,12 @@ fn parser(arguments: &[String]) -> Result<BotIdentity> {
 /// Run one BtRunner lifecycle.
 fn run(identity: BotIdentity) -> Result<()> {
     let log = logger(Some(&bot_log_name(identity.sweep_id, identity.bot_id)))?;
-    let mut runner = BtRunner::init(log.clone(), identity.sweep_id, identity.bot_id)?;
+    let mut runner = BtRunner::init(log, identity.sweep_id, identity.bot_id)?;
 
     runner.start()?;
-    runner.run()?;
-    runner.stop()?;
-    Ok(())
+    let run_result = runner.run();
+    let stop_result = runner.stop();
+    run_result.and(stop_result)
 }
 
 // Helpers

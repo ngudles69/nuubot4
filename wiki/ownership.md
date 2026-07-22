@@ -18,7 +18,7 @@ RunnerService                         live control boundary, when ported
 
 BtRunner
 |-- TickClock
-|-- ReplayInput
+|-- TickReader
 |-- ResultPublisher
 `-- Runtime
 ```

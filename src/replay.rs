@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use chrono::{Datelike, NaiveDate};
 
 use crate::Result;
+use crate::common::logging::Logger;
 use crate::config::{BtRunnerConfig, LoaderKind};
 use crate::datastore::BotSpec;
 use crate::market::BboTick;
@@ -15,8 +16,20 @@ use parquet::ParquetTickReader;
 
 /// Stream trusted BBO values from one selected external encoding.
 pub struct TickReader {
+    log: Logger,
     source: TickReaderKind,
     pending: Option<BboTick>,
+    stats: TickReaderStats,
+    stopped: bool,
+}
+
+/// Track work owned by one TickReader.
+struct TickReaderStats {
+    windows_loaded: u64,
+    ticks_loaded: u64,
+    first_ts_ms: Option<u64>,
+    last_ts_ms: Option<u64>,
+    failed: bool,
 }
 
 enum TickReaderKind {
@@ -24,18 +37,9 @@ enum TickReaderKind {
     Parquet(ParquetTickReader),
 }
 
-/// Describe the exact replay evidence expected from one Bot range.
-#[derive(Clone, Copy, Debug)]
-pub struct ReplayExpectation {
-    pub ticks: u64,
-    pub callbacks: u64,
-    pub first_ts_ms: u64,
-    pub last_ts_ms: u64,
-}
-
 /// Carry one visible calendar-week replay boundary.
 #[derive(Clone, Copy, Debug)]
-pub struct ReplayWindow {
+pub struct LoadingWindow {
     pub start: NaiveDate,
     pub end: NaiveDate,
     end_ms: u64,
@@ -43,57 +47,11 @@ pub struct ReplayWindow {
 }
 
 /// Report each calendar-week boundary once during streaming replay.
-pub struct ReplayWindows {
-    windows: std::vec::IntoIter<ReplayWindow>,
+pub struct LoadingWindows {
+    windows: std::vec::IntoIter<LoadingWindow>,
 }
 
-/// Validate replay files and return one streaming iterator.
-pub fn load_ticks(bot: &BotSpec, config: &BtRunnerConfig) -> Result<TickReader> {
-    // Build exact file list.
-    let files = replay_files(bot, config.loader)?;
-    for path in &files {
-        if !path.is_file() {
-            return Err(format!("replay file not found: {}", path.display()));
-        }
-    }
-    let start_us = date_us(bot.start)?;
-    let end_us = date_us(bot.end)?;
-
-    // Create selected reader.
-    Ok(TickReader {
-        source: match config.loader {
-            LoaderKind::Csv => TickReaderKind::Csv(CsvTickReader::new(files, start_us, end_us)),
-            LoaderKind::Parquet => TickReaderKind::Parquet(ParquetTickReader::new(
-                files,
-                start_us,
-                end_us,
-                config.parquet_batch_size,
-            )),
-        },
-        pending: None,
-    })
-}
-
-/// Calculate exact one-second replay evidence for a configured range.
-pub fn replay_expectation(bot: &BotSpec, timer_interval_ms: u64) -> Result<ReplayExpectation> {
-    // Calculate time range.
-    let start_ms = date_us(bot.start)? / 1000;
-    let end_ms = date_us(bot.end)? / 1000;
-    let duration_ms = end_ms - start_ms;
-    if duration_ms % 1000 != 0 {
-        return Err("replay range is not whole seconds".into());
-    }
-
-    // Return exact counts.
-    Ok(ReplayExpectation {
-        ticks: duration_ms / 1000,
-        callbacks: duration_ms.div_ceil(timer_interval_ms),
-        first_ts_ms: start_ms + 1000,
-        last_ts_ms: end_ms,
-    })
-}
-
-impl ReplayWindows {
+impl LoadingWindows {
     /// Split one admitted Bot range at Monday boundaries.
     pub fn new(bot: &BotSpec) -> Result<Self> {
         let mut start = bot.start;
@@ -102,7 +60,7 @@ impl ReplayWindows {
             let days = 7 - i64::from(start.weekday().num_days_from_monday());
             let monday = start + chrono::Duration::days(days);
             let end = monday.min(bot.end);
-            windows.push(ReplayWindow {
+            windows.push(LoadingWindow {
                 start,
                 end,
                 end_ms: date_us(end)? / 1000,
@@ -116,8 +74,8 @@ impl ReplayWindows {
     }
 }
 
-impl Iterator for ReplayWindows {
-    type Item = ReplayWindow;
+impl Iterator for LoadingWindows {
+    type Item = LoadingWindow;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.windows.next()
@@ -125,8 +83,45 @@ impl Iterator for ReplayWindows {
 }
 
 impl TickReader {
+    /// Validate replay files and initialize one streaming reader.
+    pub fn init(log: Logger, bot: &BotSpec, config: &BtRunnerConfig) -> Result<Self> {
+        // Build exact file list.
+        let files = replay_files(bot, config.loader)?;
+        for path in &files {
+            if !path.is_file() {
+                return Err(format!("replay file not found: {}", path.display()));
+            }
+        }
+        let start_us = date_us(bot.start)?;
+        let end_us = date_us(bot.end)?;
+
+        // Create selected reader.
+        log.info("tickreader", "init");
+        Ok(Self {
+            log,
+            source: match config.loader {
+                LoaderKind::Csv => TickReaderKind::Csv(CsvTickReader::new(files, start_us, end_us)),
+                LoaderKind::Parquet => TickReaderKind::Parquet(ParquetTickReader::new(
+                    files,
+                    start_us,
+                    end_us,
+                    config.parquet_batch_size,
+                )),
+            },
+            pending: None,
+            stats: TickReaderStats {
+                windows_loaded: 0,
+                ticks_loaded: 0,
+                first_ts_ms: None,
+                last_ts_ms: None,
+                failed: false,
+            },
+            stopped: false,
+        })
+    }
+
     /// Load one owned calendar-week replay window.
-    pub fn load_window(&mut self, window: ReplayWindow) -> Result<Vec<BboTick>> {
+    pub fn load(&mut self, window: LoadingWindow) -> Result<Vec<BboTick>> {
         let mut ticks = Vec::new();
         if let Some(tick) = self.pending.take() {
             ticks.push(tick);
@@ -136,7 +131,13 @@ impl TickReader {
                 TickReaderKind::Csv(reader) => reader.next(),
                 TickReaderKind::Parquet(reader) => reader.next(),
             };
-            let Some(tick) = next.transpose()? else {
+            let Some(tick) = (match next.transpose() {
+                Ok(tick) => tick,
+                Err(error) => {
+                    self.stats.failed = true;
+                    return Err(error);
+                }
+            }) else {
                 break;
             };
             if tick.ts_ms() > window.end_ms
@@ -147,7 +148,39 @@ impl TickReader {
             }
             ticks.push(tick);
         }
+        self.stats.windows_loaded += 1;
+        self.stats.ticks_loaded += ticks.len() as u64;
+        if let Some(first) = ticks.first() {
+            self.stats.first_ts_ms.get_or_insert(first.ts_ms());
+        }
+        if let Some(last) = ticks.last() {
+            self.stats.last_ts_ms = Some(last.ts_ms());
+        }
         Ok(ticks)
+    }
+
+    /// Log TickReader stats once.
+    pub fn stop(&mut self) -> Result<()> {
+        if self.stopped {
+            return Ok(());
+        }
+        self.stopped = true;
+        let status = if self.stats.failed {
+            "failed"
+        } else {
+            "success"
+        };
+        self.log.info(
+            "tickreader",
+            format!(
+                "stop status={status} windows_loaded={} ticks_loaded={} first_ts_ms={:?} last_ts_ms={:?}",
+                self.stats.windows_loaded,
+                self.stats.ticks_loaded,
+                self.stats.first_ts_ms,
+                self.stats.last_ts_ms
+            ),
+        );
+        Ok(())
     }
 }
 

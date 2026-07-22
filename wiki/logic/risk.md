@@ -49,3 +49,4 @@ Risk exit -> Runtime-owned stop path
 - BalancedRisk currently always returns false.
 - Risk receives no AccountSnapshot data.
 - Max drawdown and other real rules are not ported.
+- BalancedRisk logs assessment statistics during stop.

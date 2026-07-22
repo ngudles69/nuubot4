@@ -11,11 +11,10 @@ use crate::datastore::{BotSpec, SweepStore};
 pub struct SetupContext {
     pub config: AppConfig,
     pub bot: BotSpec,
-    pub log: Logger,
 }
 
 /// Build and validate common infrastructure before runner composition.
-pub fn nuubot_setup(log: Logger, sweep_id: u64, bot_id: u64) -> Result<SetupContext> {
+pub fn nuubot_setup(log: &Logger, sweep_id: u64, bot_id: u64) -> Result<SetupContext> {
     // Load root config.
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let config = load_config(&root.join("config.toml"))?;
@@ -53,7 +52,6 @@ pub fn nuubot_setup(log: Logger, sweep_id: u64, bot_id: u64) -> Result<SetupCont
     Ok(SetupContext {
         config,
         bot: BotSpec { ticks_path, ..bot },
-        log,
     })
 }
 
