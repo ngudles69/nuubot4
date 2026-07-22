@@ -4,6 +4,8 @@ Nuubot4 is the fully Rust port of `D:\rust\nuubot3`.
 
 Start with:
 
+- [User Working Profile](user.md)
+- [Chief-of-Staff Contract](soul.md)
 - [Rust Port Contract](rust-port.md)
 - [Ownership and Project Structure](ownership.md)
 - [Recon Ownership and Flow](recon.md)

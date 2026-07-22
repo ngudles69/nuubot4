@@ -45,15 +45,31 @@ shared or confused. If PostgreSQL is later required, use an isolated
 At the start of every session:
 
 1. Read `HANDOFF.md`.
-2. Read every page under `wiki/coding/**` before any coding work.
-3. Read `wiki/index.md` and the linked page for the current component.
-4. Inspect the corresponding Nuubot3 code and owning Nuubot3 wiki pages.
-5. Verify the Nuubot4 branch, status, active processes, and current proof.
-6. Restate the intended outcome, scope, files, preserved behavior, and proof;
+2. Read `wiki/user.md`.
+3. Read `wiki/soul.md`.
+4. Read every page under `wiki/coding/**` before any coding work.
+5. Read `wiki/index.md` and the linked page for the current component.
+6. Inspect the corresponding Nuubot3 code and owning Nuubot3 wiki pages.
+7. Verify the Nuubot4 branch, status, active processes, and current proof.
+8. Restate the intended outcome, scope, files, preserved behavior, and proof;
    wait for user confirmation before changing files or running task commands.
 
 Never guess about Nuubot3 behavior. Cite the exact source code and wiki used.
 When Nuubot3 code and docs disagree, stop and report the conflict.
+
+## Default Collaboration Workflow
+
+The root agent stays responsive as controller, delegates execution, and tracks
+agents. Use Luna when available, otherwise Sol-low, for fast reading, search,
+existence checks, web research, summaries, and bulk simple work. Use Sol-low
+for straightforward mechanical edits and explicitly authorized Git operations.
+The controller chooses higher reasoning for multi-file logic, diagnosis,
+architecture, lifecycle, or risky work.
+
+During interactive review, quickly delegate requested actions or changes while
+the root continues the conversation, then verify and integrate the results.
+Every agent obeys repository scope, safety, and proof rules. Commit and push
+still require explicit user authority.
 
 ## Initial Objective
 
