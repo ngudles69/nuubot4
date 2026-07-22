@@ -69,15 +69,16 @@ Runner/BtRunner. It is not a lifecycle component and owns nothing after return.
 `cloid` validates, encodes, and decodes Order identity values. It has no owner,
 lifecycle, global state, or mutation.
 
-`common` contains only genuinely shared infrastructure such as errors and
-logging. It does not own application objects.
+`common` contains only genuinely shared infrastructure such as errors,
+logging, and mechanical executable argument/exit helpers. It does not own
+application objects or program-specific parsing and lifecycle.
 
 ## Module Layout
 
 ```text
 src/bin/nuubot-btrunner.rs
 src/common.rs
-src/common/{error,logging}.rs
+src/common/{error,logging,program}.rs
 src/setup.rs
 src/cloid.rs
 src/runner.rs                         when Runner is ported

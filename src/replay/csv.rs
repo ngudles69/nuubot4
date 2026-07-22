@@ -3,8 +3,8 @@
 use std::fs::File;
 use std::path::PathBuf;
 
+use crate::Result;
 use crate::market::BboTick;
-use crate::{NuuError, Result};
 
 use super::admit_tick;
 
@@ -67,18 +67,16 @@ impl CsvTickReader {
                 self.rows = None;
                 continue;
             };
-            let row = row?;
+            let row = row.map_err(|error| format!("read CSV row: {error}"))?;
             if row.len() != 2 {
-                return Err(NuuError::Replay(
-                    "CSV row must contain exactly close_time_us,close".into(),
-                ));
+                return Err("CSV row must contain exactly close_time_us,close".into());
             }
             let close_time_us = row[0]
                 .parse::<u64>()
-                .map_err(|error| NuuError::Replay(format!("invalid close_time_us: {error}")))?;
+                .map_err(|error| format!("invalid close_time_us: {error}"))?;
             let price = row[1]
                 .parse::<f64>()
-                .map_err(|error| NuuError::Replay(format!("invalid close: {error}")))?;
+                .map_err(|error| format!("invalid close: {error}"))?;
             if close_time_us < self.start_us || close_time_us >= self.end_us {
                 continue;
             }
@@ -92,12 +90,14 @@ impl CsvTickReader {
             return Ok(false);
         };
         self.next_file += 1;
-        let mut reader = csv::ReaderBuilder::new().from_path(path)?;
-        if reader.headers()?.iter().collect::<Vec<_>>() != ["close_time_us", "close"] {
-            return Err(NuuError::Replay(format!(
-                "unexpected CSV header: {}",
-                path.display()
-            )));
+        let mut reader = csv::ReaderBuilder::new()
+            .from_path(path)
+            .map_err(|error| format!("open CSV {}: {error}", path.display()))?;
+        let headers = reader
+            .headers()
+            .map_err(|error| format!("read CSV header {}: {error}", path.display()))?;
+        if headers.iter().collect::<Vec<_>>() != ["close_time_us", "close"] {
+            return Err(format!("unexpected CSV header: {}", path.display()));
         }
         self.rows = Some(reader.into_records());
         Ok(true)

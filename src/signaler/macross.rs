@@ -15,7 +15,7 @@ pub struct MacrossSignaler {
 impl MacrossSignaler {
     /// Initialize one Macross Signaler.
     pub fn init(log: Logger, config: SignalerConfig) -> Result<Self> {
-        log.info("signaler", "init")?;
+        log.info("signaler", "init");
         Ok(Self {
             config,
             closes: Vec::new(),

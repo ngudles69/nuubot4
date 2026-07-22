@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use chrono::{Datelike, NaiveDate};
 
+use crate::Result;
 use crate::config::{BtRunnerConfig, LoaderKind};
 use crate::datastore::BotSpec;
 use crate::market::BboTick;
-use crate::{NuuError, Result};
 
 mod csv;
 mod parquet;
@@ -53,7 +53,7 @@ pub fn load_ticks(bot: &BotSpec, config: &BtRunnerConfig) -> Result<TickReader> 
     let files = replay_files(bot, config.loader)?;
     for path in &files {
         if !path.is_file() {
-            return Err(NuuError::MissingPath(path.clone()));
+            return Err(format!("replay file not found: {}", path.display()));
         }
     }
     let start_us = date_us(bot.start)?;
@@ -81,7 +81,7 @@ pub fn replay_expectation(bot: &BotSpec, timer_interval_ms: u64) -> Result<Repla
     let end_ms = date_us(bot.end)? / 1000;
     let duration_ms = end_ms - start_ms;
     if duration_ms % 1000 != 0 {
-        return Err(NuuError::Replay("replay range is not whole seconds".into()));
+        return Err("replay range is not whole seconds".into());
     }
 
     // Return exact counts.
@@ -160,9 +160,9 @@ pub(super) fn admit_tick(
     // Validate close boundary.
     let fraction_us = close_time_us % 1_000_000;
     if !(999_000..=999_999).contains(&fraction_us) {
-        return Err(NuuError::Replay(format!(
+        return Err(format!(
             "1s close_time_us must end in 999000..=999999, received {close_time_us}"
-        )));
+        ));
     }
 
     // Normalize close time.
@@ -170,17 +170,15 @@ pub(super) fn admit_tick(
         .checked_div(1_000_000)
         .and_then(|second| second.checked_add(1))
         .and_then(|second| second.checked_mul(1000))
-        .ok_or_else(|| NuuError::Replay("close_time_us normalization overflow".into()))?;
+        .ok_or_else(|| "close_time_us normalization overflow".to_owned())?;
 
     // Enforce one-second order.
     if let Some(last) = *last_ms {
         let expected = last
             .checked_add(1000)
-            .ok_or_else(|| NuuError::Replay("1s sequence overflow".into()))?;
+            .ok_or_else(|| "1s sequence overflow".to_owned())?;
         if ts_ms != expected {
-            return Err(NuuError::Replay(format!(
-                "1s sequence expected {expected}, received {ts_ms}"
-            )));
+            return Err(format!("1s sequence expected {expected}, received {ts_ms}"));
         }
     }
 
@@ -197,7 +195,7 @@ fn replay_files(bot: &BotSpec, loader: LoaderKind) -> Result<Vec<PathBuf>> {
         .parent()
         .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
-        .ok_or_else(|| NuuError::Replay("tick path has no market parent".into()))?;
+        .ok_or_else(|| "tick path has no market parent".to_owned())?;
     let extension = match loader {
         LoaderKind::Csv => "csv",
         LoaderKind::Parquet => "parquet",
@@ -228,7 +226,7 @@ fn date_us(date: NaiveDate) -> Result<u64> {
             .and_utc()
             .timestamp_micros(),
     )
-    .map_err(|_| NuuError::Replay("date precedes Unix epoch".into()))
+    .map_err(|_| "date precedes Unix epoch".to_owned())
 }
 
 #[cfg(test)]

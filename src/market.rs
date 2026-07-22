@@ -1,4 +1,4 @@
-use crate::{NuuError, Result};
+use crate::Result;
 
 /// Carry one validated best-bid-offer replay event.
 #[derive(Clone, Copy, Debug)]
@@ -12,9 +12,7 @@ impl BboTick {
     pub fn admit(ts_ms: u64, price: f64) -> Result<Self> {
         // Validate boundary once.
         if ts_ms == 0 || !price.is_finite() || price <= 0.0 {
-            return Err(NuuError::Replay(format!(
-                "invalid BBO timestamp={ts_ms} price={price}"
-            )));
+            return Err(format!("invalid BBO timestamp={ts_ms} price={price}"));
         }
         Ok(Self { ts_ms, price })
     }

@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use rusqlite::{Connection, OpenFlags, params};
 
 use super::models::{BotSpec, StoredBotConfig};
-use crate::{NuuError, Result};
+use crate::Result;
 
 /// Own one read-only connection to the Nuubot4 Sweep copy.
 pub struct SweepStore {
@@ -18,9 +18,10 @@ impl SweepStore {
     pub fn open(path: &Path) -> Result<Self> {
         // Require owned copy.
         if !path.is_file() {
-            return Err(NuuError::MissingPath(path.to_path_buf()));
+            return Err(format!("sweep database not found: {}", path.display()));
         }
-        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| format!("open sweep database {}: {error}", path.display()))?;
         Ok(Self { connection })
     }
 
@@ -34,30 +35,22 @@ impl SweepStore {
                 params![sweep_id, bot_id],
                 |row| row.get(0),
             )
-            .map_err(|error| {
-                NuuError::Datastore(format!("Bot sweep_id={sweep_id} bot_id={bot_id}: {error}"))
-            })?;
+            .map_err(|error| format!("load Bot sweep_id={sweep_id} bot_id={bot_id}: {error}"))?;
         let stored: StoredBotConfig = serde_json::from_str(&json).map_err(|error| {
-            NuuError::Datastore(format!(
-                "invalid Bot config sweep_id={sweep_id} bot_id={bot_id}: {error}"
-            ))
+            format!("parse Bot config sweep_id={sweep_id} bot_id={bot_id}: {error}")
         })?;
 
         // Validate Bot fields.
         let symbol = stored.general.symbol.trim().to_owned();
         if symbol.is_empty() || stored.data.ticks.as_os_str().is_empty() {
-            return Err(NuuError::Datastore(
-                "Bot symbol or tick path is empty".into(),
-            ));
+            return Err("Bot symbol or tick path is empty".into());
         }
         let start = NaiveDate::parse_from_str(&stored.date_range.start, "%Y-%m-%d")
-            .map_err(|error| NuuError::Datastore(format!("invalid start date: {error}")))?;
+            .map_err(|error| format!("invalid Bot start date: {error}"))?;
         let end = NaiveDate::parse_from_str(&stored.date_range.end, "%Y-%m-%d")
-            .map_err(|error| NuuError::Datastore(format!("invalid end date: {error}")))?;
+            .map_err(|error| format!("invalid Bot end date: {error}"))?;
         if start >= end {
-            return Err(NuuError::Datastore(
-                "Bot start date must precede end date".into(),
-            ));
+            return Err("Bot start date must precede end date".into());
         }
         Ok(BotSpec {
             symbol,

@@ -13,4 +13,4 @@ pub mod runtime;
 pub mod setup;
 pub mod signaler;
 
-pub use common::error::{NuuError, Result};
+pub use common::error::Result;

@@ -1,6 +1,6 @@
 //! CLOID encoding.
 
-use crate::{NuuError, Result};
+use crate::Result;
 
 /// Carry the canonical decoded 128-bit Order identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,9 +33,7 @@ pub fn encode_cloid(fields: CloidFields) -> Result<String> {
         || fields.order_pos > 1000
         || fields.timestamp_s > 0x7fff_ffff
     {
-        return Err(NuuError::Cloid(
-            "one field is outside its fixed range".into(),
-        ));
+        return Err("one CLOID field is outside its fixed range".into());
     }
 
     // Pack fixed fields.
@@ -60,12 +58,10 @@ pub fn decode_cloid(cloid: &str) -> Result<CloidFields> {
         || !cloid.starts_with("0x")
         || !cloid[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        return Err(NuuError::Cloid(
-            "cloid must be 0x followed by exactly 32 hex characters".into(),
-        ));
+        return Err("cloid must be 0x followed by exactly 32 hex characters".into());
     }
-    let raw = u128::from_str_radix(&cloid[2..], 16)
-        .map_err(|error| NuuError::Cloid(error.to_string()))?;
+    let raw =
+        u128::from_str_radix(&cloid[2..], 16).map_err(|error| format!("parse CLOID: {error}"))?;
 
     // Unpack fixed fields.
     let fields = CloidFields {
@@ -87,9 +83,7 @@ pub fn decode_cloid(cloid: &str) -> Result<CloidFields> {
         || fields.order_pos == 0
         || fields.order_pos > 1000
     {
-        return Err(NuuError::Cloid(
-            "decoded Order identity is outside its fixed range".into(),
-        ));
+        return Err("decoded Order identity is outside its fixed range".into());
     }
     Ok(fields)
 }

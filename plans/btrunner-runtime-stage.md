@@ -131,11 +131,10 @@ All deterministic validation happens before Runtime starts where possible.
 Per-row numeric/timestamp validation happens before each tick enters Runtime.
 This stage performs no datastore mutation or external trading call.
 
-Logging starts with a generic `setup` component target before identity is
-known. `nuubot_setup` then creates one `BotIdentity` value. BtRunner, Runtime,
-Signaler, Risk, BotCycle, and Executors use that identity in the single ordered
-process log. The operator script owns the explicit per-process summary log and
-failure diagnostics; modules do not scatter direct output.
+The binary parser creates one `BotIdentity`. `run()` creates the named Bot log
+before setup validates the stored Bot. BtRunner, Runtime, Signaler, Risk,
+BotCycle, and Executors share that single ordered process log. The shared
+program exit helper logs the final error once.
 
 Failure classes:
 
@@ -149,13 +148,13 @@ Failure classes:
 | Backward timestamp | TickClock fails immediately |
 | Empty replay | Fail run; still stop initialized children |
 | Contradictory MA periods or event limits | Fail Runtime config admission |
-| Cleanup after earlier failure | Preserve the first error; stop remains idempotent |
+| Any lifecycle failure | Propagate directly to shared `main`; log once and exit |
 
 The default error policy is fail loud and fail fast. Every error propagates to
-the binary, triggers one graceful reverse-order stop of initialized ownership,
-and exits nonzero with the first cause. There are no retries, skipped records,
-fallback loaders, partial-success outcomes, or swallowed cleanup errors unless
-a specific failure is later proven and explicitly approved as recoverable.
+the shared binary `main`, is logged once, and exits nonzero. `stop()` runs only
+after successful `init`, `start`, and `run`. There are no retries, skipped
+records, fallback loaders, partial-success outcomes, or secondary cleanup error
+paths unless a specific recovery contract is later approved.
 
 ## Readability Contract
 

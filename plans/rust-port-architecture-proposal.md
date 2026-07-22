@@ -141,19 +141,22 @@ reusable package.
 
 ## Composition And Lifecycle
 
-The binaries contain argument parsing and top-level error/exit mapping. They
-construct Runner or BtRunner, which owns the complete program lifecycle:
+The binaries contain program-specific argument parsing and lifecycle flow.
+Shared `common/program.rs` helpers collect raw arguments and own the one final
+error/exit mapping. The binaries construct Runner or BtRunner, which owns the
+complete program lifecycle:
 configuration, logging, datastores, stored state, inputs, Clock,
 Runtime, supervision, shutdown, and result publication where applicable.
 
 ```text
-binary main
+binary main and common argument/exit helpers
+-> binary parser
 -> construct Runner or BtRunner from identity
 -> Runner/BtRunner.init
 -> Runner/BtRunner.start
 -> Runner/BtRunner.run
 -> Runner/BtRunner.stop
--> preserve the first failure and map it to process exit
+-> propagate the first failing phase to the shared process exit handler
 ```
 
 Runner and BtRunner compose direct environment children:
@@ -433,7 +436,7 @@ types; domain objects do not import binary, CLI, Server, or SDK types.
 Current justified dependencies are boundary-specific: `serde`/`toml`/JSON for
 config and Bot rows, `rusqlite` for the read-only Sweep copy, Arrow Parquet for
 two projected columns, `chrono` for calendar windows, CSV for strict decoding,
-and `thiserror` for typed propagation. Add `rust_decimal`, a synchronous
+and plain text errors propagated with `Result` and `?`. Add `rust_decimal`, a synchronous
 PostgreSQL client, or the pinned Hyperliquid SDK only when their vertical stage
 uses them. Tokio and tracing are not current defaults.
 

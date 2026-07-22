@@ -29,8 +29,17 @@ obvious.
 
 ## Program Flow
 
+- Reserve Program Flow for control flow, ownership, lifecycle, loops, and calls
+  to intent-named functions that perform the actual work.
+- Do not place verbose mechanical implementation in Program Flow. Move it to
+  its owning module or to the domain/helper sections below.
 - Make entrypoints, control structures, loops, and key intent functions read
   top-to-bottom like the program's execution.
+- Keep executable `main` mechanical. Shared program helpers collect raw
+  arguments, handle the final error once, and return the exit code. The
+  executable's `program` function should normally read as `parser` then `run`.
+- Lower functions propagate errors with `?`. They do not log or handle errors;
+  the shared `main` boundary does that once before process exit.
 - Keep every lifecycle method that exists contiguous and in canonical order:
   `init -> start -> run/mainloop -> stop`.
 - Omit lifecycle phases that have no real work. Never add placeholder methods
@@ -44,6 +53,26 @@ obvious.
   `log`; the logging library owns file and console output.
 - Put policy in configuration. Do not scatter policy checks through application
   code.
+
+Do not build a Bot log filename inside BtRunner program flow:
+
+```rust
+let log_name = format!(
+    "nuubot4-bot-{}-{}",
+    identity.sweep_id,
+    identity.bot_id,
+);
+let log = logger(Some(&log_name))?;
+```
+
+Call the logging helper that owns that mechanical naming rule:
+
+```rust
+let log = logger(Some(&bot_log_name(
+    identity.sweep_id,
+    identity.bot_id,
+)))?;
+```
 
 ## Domain Logic
 
@@ -71,9 +100,8 @@ intent.
 - Keep paired outcomes symmetrical: `success/failure`, `start/stop`, and
   `enable/disable`.
 - There is no one-word or two-word rule. Use the shortest unmistakable name.
-- Reject vague names such as `fail` and misleading transport names such as
-  `print_summary` when the real responsibility is `log_failure` or
-  `log_success`.
+- Keep outcome logging visible as `log.info(...)` or `log.error(...)`. Do not
+  hide one-use outcome branches behind logging wrappers.
 - Treat a program's argument parser as program flow. Parsing primitives used by
   multiple owners are mechanical helpers.
 - Add a named type only when the current values become unclear. For example,

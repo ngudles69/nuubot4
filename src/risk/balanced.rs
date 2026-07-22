@@ -10,7 +10,7 @@ pub struct BalancedRisk;
 impl BalancedRisk {
     /// Initialize one Balanced Risk.
     pub fn init(log: Logger, _config: RiskConfig) -> Result<Self> {
-        log.info("risk", "init")?;
+        log.info("risk", "init");
         Ok(Self)
     }
 

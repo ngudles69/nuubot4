@@ -1,10 +1,10 @@
+use crate::Result;
 use crate::botcycle::ControlBotCycle;
 use crate::common::logging::Logger;
 use crate::config::RuntimeConfig;
 use crate::market::{Bar, BboTick};
 use crate::risk::BalancedRisk;
 use crate::signaler::MacrossSignaler;
-use crate::{NuuError, Result};
 
 /// Expose one bounded Runtime result to BtRunner.
 #[derive(Clone, Copy, Debug)]
@@ -33,7 +33,7 @@ impl Runtime {
 
     /// Create and initialize the Runtime-owned subtree.
     pub fn init(log: Logger, config: RuntimeConfig) -> Result<Self> {
-        log.info("runtime", "init")?;
+        log.info("runtime", "init");
 
         // Initialize direct children.
         let signaler = MacrossSignaler::init(log.clone(), config.signaler.clone())?;
@@ -61,16 +61,14 @@ impl Runtime {
     /// Open Runtime admission after its subtree is ready.
     pub fn start(&mut self) -> Result<()> {
         if self.started || self.stopped {
-            return Err(NuuError::Lifecycle(
-                "Runtime cannot start from current state".into(),
-            ));
+            return Err("Runtime cannot start from current state".into());
         }
-        self.log.info("runtime", "start")?;
+        self.log.info("runtime", "start");
 
         // Start active cycle.
         self.botcycle
             .as_mut()
-            .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
+            .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .start()?;
         self.started = true;
         Ok(())
@@ -79,7 +77,7 @@ impl Runtime {
     /// Perform one bounded Bot decision pass.
     pub fn mainloop(&mut self, now_ms: u64) -> Result<RuntimeOutcome> {
         if !self.started || self.stopped {
-            return Err(NuuError::Lifecycle("Runtime is not running".into()));
+            return Err("Runtime is not running".into());
         }
         self.mainloop_count += 1;
 
@@ -96,7 +94,7 @@ impl Runtime {
         let completed = self
             .botcycle
             .as_mut()
-            .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
+            .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .mainloop(now_ms)?;
         if !completed {
             return Ok(self.outcome());
@@ -121,15 +119,11 @@ impl Runtime {
             return Ok(());
         }
         // Close child ownership.
-        let log_error = self.log.info("runtime", "stop").err();
+        self.log.info("runtime", "stop");
         self.request_stop("parent_stop");
         self.started = false;
         self.stopped = true;
-        let child_result = self.close_cycle();
-        match log_error {
-            Some(error) => Err(error),
-            None => child_result,
-        }
+        self.close_cycle()
     }
 
     // Domain inputs and state
@@ -137,13 +131,11 @@ impl Runtime {
     /// Deliver one trusted BBO to the active cycle.
     pub fn ingest_bbo(&mut self, bbo: BboTick) -> Result<()> {
         if !self.started || self.stopped || self.stop_reason.is_some() {
-            return Err(NuuError::Lifecycle(
-                "Runtime cannot ingest BBO from current state".into(),
-            ));
+            return Err("Runtime cannot ingest BBO from current state".into());
         }
         self.botcycle
             .as_mut()
-            .ok_or_else(|| NuuError::Lifecycle("Runtime has no BotCycle".into()))?
+            .ok_or_else(|| "Runtime has no BotCycle".to_owned())?
             .on_bbo(bbo);
         Ok(())
     }
@@ -151,9 +143,7 @@ impl Runtime {
     /// Deliver trusted Bars through Signaler then BotCycle.
     pub fn ingest_bars(&mut self, bars: &[Bar]) -> Result<()> {
         if !self.started || self.stopped || self.stop_reason.is_some() {
-            return Err(NuuError::Lifecycle(
-                "Runtime cannot ingest Bars from current state".into(),
-            ));
+            return Err("Runtime cannot ingest Bars from current state".into());
         }
         for bar in bars {
             self.signaler.on_bar(*bar);

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{NuuError, Result};
+use crate::Result;
 
 /// Hold the complete non-secret installation configuration.
 #[derive(Clone, Debug, Deserialize)]
@@ -116,9 +116,10 @@ pub struct SimulatorConfig {
 /// Load and validate the root non-secret configuration.
 pub fn load_config(path: &Path) -> Result<AppConfig> {
     // Read config text.
-    let text = fs::read_to_string(path)?;
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("read config {}: {error}", path.display()))?;
     let config: AppConfig = toml::from_str(&text)
-        .map_err(|error| NuuError::Config(format!("{}: {error}", path.display())))?;
+        .map_err(|error| format!("parse config {}: {error}", path.display()))?;
 
     // Validate core settings.
     validate_config(&config)?;
@@ -129,65 +130,52 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 fn validate_config(config: &AppConfig) -> Result<()> {
     // Check required strings.
     if config.environment.name.trim().is_empty() {
-        return Err(NuuError::Config("environment.name is empty".into()));
+        return Err("environment.name is empty".into());
     }
     if config.paths.shared_data.as_os_str().is_empty()
         || config.paths.sweep_database.as_os_str().is_empty()
         || config.paths.credentials.as_os_str().is_empty()
         || config.paths.logs.as_os_str().is_empty()
     {
-        return Err(NuuError::Config("one configured path is empty".into()));
+        return Err("one configured path is empty".into());
     }
 
     // Check replay limits.
     if config.btrunner.timer_interval_ms == 0 || config.btrunner.parquet_batch_size == 0 {
-        return Err(NuuError::Config(
-            "BtRunner timer and batch size must be positive".into(),
-        ));
+        return Err("BtRunner timer and batch size must be positive".into());
     }
 
     // Check Runtime shape.
     if config.runtime.max_cycles == 0 || config.runtime.executors.is_empty() {
-        return Err(NuuError::Config(
-            "Runtime requires max_cycles and at least one Executor".into(),
-        ));
+        return Err("Runtime requires max_cycles and at least one Executor".into());
     }
     if config.runtime.signaler.kind != "macross" {
-        return Err(NuuError::Config(format!(
+        return Err(format!(
             "unknown Signaler: {}",
             config.runtime.signaler.kind
-        )));
+        ));
     }
     if config.runtime.signaler.fast_ma == 0
         || config.runtime.signaler.fast_ma >= config.runtime.signaler.slow_ma
     {
-        return Err(NuuError::Config(
-            "Macross fast_ma must be positive and less than slow_ma".into(),
-        ));
+        return Err("Macross fast_ma must be positive and less than slow_ma".into());
     }
 
     // Check child selections.
     for executor in &config.runtime.executors {
         if executor.kind != "observer" {
-            return Err(NuuError::Config(format!(
-                "unknown Executor: {}",
-                executor.kind
-            )));
+            return Err(format!("unknown Executor: {}", executor.kind));
         }
         if executor.max_ticks.is_none() && executor.max_bars.is_none() {
-            return Err(NuuError::Config(
-                "ObserverExecutor requires max_ticks or max_bars".into(),
-            ));
+            return Err("ObserverExecutor requires max_ticks or max_bars".into());
         }
         if executor.max_ticks == Some(0) || executor.max_bars == Some(0) {
-            return Err(NuuError::Config(
-                "ObserverExecutor limits must be positive".into(),
-            ));
+            return Err("ObserverExecutor limits must be positive".into());
         }
     }
     for risk in &config.runtime.risks {
         if risk.kind != "balanced" {
-            return Err(NuuError::Config(format!("unknown Risk: {}", risk.kind)));
+            return Err(format!("unknown Risk: {}", risk.kind));
         }
     }
 
@@ -199,7 +187,7 @@ fn validate_config(config: &AppConfig) -> Result<()> {
         || !config.simulator.slippage_pct.is_finite()
         || config.simulator.slippage_pct < 0.0
     {
-        return Err(NuuError::Config("invalid Simulator defaults".into()));
+        return Err("invalid Simulator defaults".into());
     }
     Ok(())
 }

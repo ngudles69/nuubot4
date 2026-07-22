@@ -7,8 +7,8 @@ use arrow_array::{Array, Float64Array, Int64Array, RecordBatch};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::{ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder};
 
+use crate::Result;
 use crate::market::BboTick;
-use crate::{NuuError, Result};
 
 use super::admit_tick;
 
@@ -75,17 +75,16 @@ impl ParquetTickReader {
                     let times = batch
                         .column_by_name("close_time_us")
                         .and_then(|column| column.as_any().downcast_ref::<Int64Array>())
-                        .ok_or_else(|| NuuError::Replay("close_time_us must be Int64".into()))?;
+                        .ok_or_else(|| "close_time_us must be Int64".to_owned())?;
                     let prices = batch
                         .column_by_name("close")
                         .and_then(|column| column.as_any().downcast_ref::<Float64Array>())
-                        .ok_or_else(|| NuuError::Replay("close must be Float64".into()))?;
+                        .ok_or_else(|| "close must be Float64".to_owned())?;
                     if times.is_null(row) || prices.is_null(row) {
-                        return Err(NuuError::Replay("Parquet BBO contains null".into()));
+                        return Err("Parquet BBO contains null".into());
                     }
-                    let close_time_us = u64::try_from(times.value(row)).map_err(|_| {
-                        NuuError::Replay("close_time_us must be non-negative".into())
-                    })?;
+                    let close_time_us = u64::try_from(times.value(row))
+                        .map_err(|_| "close_time_us must be non-negative".to_owned())?;
                     if close_time_us < self.start_us || close_time_us >= self.end_us {
                         continue;
                     }
@@ -104,7 +103,8 @@ impl ParquetTickReader {
             }
             match self.reader.as_mut().expect("opened Parquet").next() {
                 Some(batch) => {
-                    self.batch = Some(batch.map_err(|error| NuuError::Replay(error.to_string()))?);
+                    self.batch =
+                        Some(batch.map_err(|error| format!("read Parquet batch: {error}"))?);
                     self.row = 0;
                 }
                 None => self.reader = None,
@@ -118,20 +118,24 @@ impl ParquetTickReader {
             return Ok(false);
         };
         self.next_file += 1;
-        let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(path)?)?;
+        let file = File::open(path)
+            .map_err(|error| format!("open Parquet {}: {error}", path.display()))?;
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+            .map_err(|error| format!("read Parquet metadata {}: {error}", path.display()))?;
         let schema = builder.schema();
         let time = schema
             .index_of("close_time_us")
-            .map_err(|error| NuuError::Replay(error.to_string()))?;
+            .map_err(|error| format!("find close_time_us in {}: {error}", path.display()))?;
         let close = schema
             .index_of("close")
-            .map_err(|error| NuuError::Replay(error.to_string()))?;
+            .map_err(|error| format!("find close in {}: {error}", path.display()))?;
         let projection = ProjectionMask::roots(builder.parquet_schema(), [time, close]);
         self.reader = Some(
             builder
                 .with_projection(projection)
                 .with_batch_size(self.batch_size)
-                .build()?,
+                .build()
+                .map_err(|error| format!("open Parquet reader {}: {error}", path.display()))?,
         );
         Ok(true)
     }

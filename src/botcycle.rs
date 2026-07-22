@@ -1,8 +1,8 @@
+use crate::Result;
 use crate::common::logging::Logger;
 use crate::config::ExecutorConfig;
 use crate::executor::ObserverExecutor;
 use crate::market::{Bar, BboTick};
-use crate::{NuuError, Result};
 
 /// Own temporary control Executors for one Bot cycle.
 pub struct ControlBotCycle {
@@ -17,7 +17,7 @@ impl ControlBotCycle {
 
     /// Create and initialize every configured Executor.
     pub fn init(log: Logger, configs: &[ExecutorConfig]) -> Result<Self> {
-        log.info("botcycle", "init")?;
+        log.info("botcycle", "init");
         let executors = configs
             .iter()
             .cloned()
@@ -34,11 +34,9 @@ impl ControlBotCycle {
     /// Open this cycle for bounded work.
     pub fn start(&mut self) -> Result<()> {
         if self.running || self.stopped {
-            return Err(NuuError::Lifecycle(
-                "BotCycle cannot start from current state".into(),
-            ));
+            return Err("BotCycle cannot start from current state".into());
         }
-        self.log.info("botcycle", "start")?;
+        self.log.info("botcycle", "start");
         self.running = true;
         Ok(())
     }
@@ -46,7 +44,7 @@ impl ControlBotCycle {
     /// Advance every active Executor once.
     pub fn mainloop(&mut self, now_ms: u64) -> Result<bool> {
         if !self.running {
-            return Err(NuuError::Lifecycle("BotCycle is not running".into()));
+            return Err("BotCycle is not running".into());
         }
         for executor in &mut self.executors {
             if !executor.terminal() {
@@ -65,7 +63,8 @@ impl ControlBotCycle {
         self.stopped = true;
 
         // Preserve first failure.
-        let mut first_error = self.log.info("botcycle", "stop").err();
+        self.log.info("botcycle", "stop");
+        let mut first_error = None;
         for executor in self.executors.iter_mut().rev() {
             if let Err(error) = executor.stop() {
                 first_error.get_or_insert(error);

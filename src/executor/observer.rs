@@ -19,7 +19,7 @@ impl ObserverExecutor {
 
     /// Initialize one Observer Executor.
     pub fn init(log: Logger, config: ExecutorConfig) -> Result<Self> {
-        log.info("executor", "init")?;
+        log.info("executor", "init");
         Ok(Self {
             log,
             config,
@@ -48,7 +48,7 @@ impl ObserverExecutor {
     pub fn stop(&mut self) -> Result<()> {
         if !self.terminal {
             self.terminal = true;
-            self.log.info("executor", "stop")?;
+            self.log.info("executor", "stop");
         }
         Ok(())
     }

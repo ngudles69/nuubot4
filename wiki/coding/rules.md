@@ -78,7 +78,9 @@ Use the [Project Parity Proof](../project.md#parity-proof) for parity work.
 - Keep lifecycle order visible: `init -> start -> run/mainloop -> stop`.
 - Put work in its real phase. Omit empty or fake lifecycle methods.
 - Stop admission first, then unwind direct children in safe reverse order.
-- Make `stop` idempotent and preserve the first failure during cleanup.
+- Make `stop` idempotent when reached. An earlier lifecycle error propagates
+  directly to the executable `main`; do not add a second cleanup error path
+  unless that component has an explicit recovery contract.
 - Prefer direct structs and functions. Use enums for closed state and outcomes.
 - Add a trait only when two current implementations need the same boundary.
 - Make invalid state difficult to represent without hiding lifecycle order.
@@ -121,7 +123,12 @@ See [Ownership and Project Structure](../ownership.md) for the current map.
 ## Trust and Failure
 
 - Use checked conversions at config, data, datastore, and external boundaries.
-- Use typed errors for recoverable failures.
+- Return complete plain text for program-fatal failures.
+- Use typed errors only when callers recover differently by error kind.
+- Lower functions return errors unchanged through `Result` and `?`.
+- Only the executable's shared `main` boundary logs the final error, returns
+  failure, and exits. Never log, wrap, retry, or handle the same error again at
+  an arbitrary lower layer.
 - Validate external input once, then trust the admitted Rust type.
 - Reject complete invalid input before mutation, persistence, or external calls.
 - Treat broken internal invariants as producer bugs. Fail and fix the producer.
@@ -136,6 +143,8 @@ See [Ownership and Project Structure](../ownership.md) for the current map.
 
 - Log early failures through one generic module target.
 - Once Bot identity exists, every owned component uses that shared Bot log.
+- The logging layer receives an optional log filename. It does not interpret
+  Bot, Sweep, Runner, or other domain identity.
 - Do not scatter ad hoc output or create per-component Bot logs.
 - Always write logs to file. `logging.console` controls only the console mirror.
 - The stability harness may write one run-summary log plus failure diagnostics.
